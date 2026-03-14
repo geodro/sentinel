@@ -68,7 +68,7 @@ freshclam
 ## Installation
 
 ```bash
-git clone https://github.com/youruser/sentinel.git
+git clone https://github.com/geodro/sentinel.git
 cd sentinel
 bash install.sh
 ```
@@ -156,6 +156,93 @@ SENTINEL_QUARANTINE=/var/quarantine git clone https://github.com/example/repo.gi
 # Skip audit warnings
 SENTINEL_SKIP_AUDIT=1 composer install
 ```
+
+---
+
+## CI / CD pipelines
+
+In CI there is no interactive shell to source wrappers into — call `sentinel` directly instead. No shell wrappers or `install.sh` are needed; just copy the binary and add it to `PATH`.
+
+### GitHub Actions
+
+```yaml
+# .github/workflows/security-scan.yml
+name: Security Scan
+
+on: [push, pull_request]
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch sentinel
+        run: |
+          git clone https://github.com/geodro/sentinel.git /tmp/sentinel
+          mkdir -p "$HOME/.local/bin"
+          cp /tmp/sentinel/sentinel "$HOME/.local/bin/sentinel"
+          chmod +x "$HOME/.local/bin/sentinel"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Cache ClamAV signatures
+        uses: actions/cache@v4
+        with:
+          path: /var/lib/clamav
+          key: clamav-${{ runner.os }}-${{ hashFiles('/var/lib/clamav/main.cvd') }}
+          restore-keys: clamav-${{ runner.os }}-
+
+      - name: Install ClamAV and update signatures
+        run: |
+          sudo apt-get install -y clamav
+          sudo systemctl stop clamav-freshclam
+          sudo freshclam
+
+      - name: Install dependencies (with scan)
+        run: sentinel npm install
+        # composer: sentinel composer install
+```
+
+`$GITHUB_PATH` is the GitHub Actions mechanism for adding to `PATH` — equivalent to `export PATH=` in a local shell.
+
+> **Tip:** If sentinel is a submodule or lives in the same repo as your project, replace the `Fetch sentinel` step with `cp sentinel "$HOME/.local/bin/sentinel"` — no clone needed.
+
+### Bitbucket Pipelines
+
+```yaml
+# bitbucket-pipelines.yml
+pipelines:
+  default:
+    - step:
+        name: Install and scan dependencies
+        image: node:20
+        caches:
+          - clamav
+        script:
+          - apt-get update && apt-get install -y clamav git
+          - freshclam
+          - git clone https://github.com/geodro/sentinel.git /tmp/sentinel
+          - mkdir -p "$HOME/.local/bin"
+          - cp /tmp/sentinel/sentinel "$HOME/.local/bin/sentinel"
+          - chmod +x "$HOME/.local/bin/sentinel"
+          - export PATH="$HOME/.local/bin:$PATH"
+          - sentinel npm install
+          # composer: sentinel composer install
+
+definitions:
+  caches:
+    clamav: /var/lib/clamav
+```
+
+### Notes
+
+| Topic | Detail |
+|---|---|
+| Signature update time | `freshclam` adds ~1–2 min on a cold cache. Cache `/var/lib/clamav` between runs to avoid this. |
+| Scan time | Large `node_modules` trees can be slow. Tune with `SENTINEL_CLAM_OPTS`. |
+| Audit exit codes | `npm audit` / `composer audit` are non-fatal by default (warnings only). |
+| Malware detection | Exit code `2` on infection — the build fails automatically. |
+| Skipping scans | `SENTINEL_SKIP_CLAM=1` or `SENTINEL_SKIP_AUDIT=1` to bypass individual checks for a step. |
 
 ---
 
