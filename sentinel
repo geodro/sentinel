@@ -1,0 +1,241 @@
+#!/usr/bin/env bash
+# sentinel — Run package manager / git commands with ClamAV + audit scanning
+#
+# Usage:
+#   sentinel npm install
+#   sentinel composer install
+#   sentinel npm i lodash
+#   sentinel git clone <url> [dir]
+#   sentinel git pull
+#
+# Dependencies: clamav (clamscan), npm or composer
+
+set -euo pipefail
+
+QUARANTINE_DIR="${SENTINEL_QUARANTINE:-/tmp/sentinel-quarantine}"
+CLAM_OPTS="${SENTINEL_CLAM_OPTS:---infected --suppress-ok-results}"
+SKIP_CLAM="${SENTINEL_SKIP_CLAM:-0}"
+SKIP_AUDIT="${SENTINEL_SKIP_AUDIT:-0}"
+
+RED='\033[0;31m'
+YELLOW='\033[1;33m'
+GREEN='\033[0;32m'
+BOLD='\033[1m'
+RESET='\033[0m'
+
+log()  { echo -e "${BOLD}[sentinel]${RESET} $*"; }
+ok()   { echo -e "${GREEN}[sentinel] $*${RESET}"; }
+warn() { echo -e "${YELLOW}[sentinel] WARNING: $*${RESET}"; }
+fail() { echo -e "${RED}[sentinel] FAILED: $*${RESET}"; }
+
+require() {
+    if ! command -v "$1" &>/dev/null; then
+        warn "$1 not found — skipping ${2:-that step}"
+        return 1
+    fi
+}
+
+run_clamscan() {
+    local dir="$1"
+    local label="$2"
+
+    if [[ "$SKIP_CLAM" == "1" ]]; then
+        warn "ClamAV scan skipped (SENTINEL_SKIP_CLAM=1)"
+        return 0
+    fi
+
+    if ! require clamscan "ClamAV scan"; then return 0; fi
+
+    if [[ ! -d "$dir" ]]; then
+        warn "$dir not found, skipping ClamAV scan"
+        return 0
+    fi
+
+    log "Scanning ${label} with ClamAV..."
+    mkdir -p "$QUARANTINE_DIR"
+
+    # shellcheck disable=SC2086
+    if clamscan -r "$dir" $CLAM_OPTS --move="$QUARANTINE_DIR"; then
+        ok "ClamAV: no threats found in ${label}"
+    else
+        local exit_code=$?
+        if [[ $exit_code -eq 1 ]]; then
+            fail "ClamAV: threats found in ${label}! Infected files moved to ${QUARANTINE_DIR}"
+            fail "Review quarantined files before proceeding."
+            return 1
+        else
+            warn "ClamAV exited with code ${exit_code} (scan error)"
+        fi
+    fi
+}
+
+run_npm_audit() {
+    if [[ "$SKIP_AUDIT" == "1" ]]; then
+        warn "npm audit skipped (SENTINEL_SKIP_AUDIT=1)"
+        return 0
+    fi
+
+    if ! require npm "npm audit"; then return 0; fi
+
+    log "Running npm audit..."
+    if npm audit; then
+        ok "npm audit: no vulnerabilities found"
+    else
+        warn "npm audit reported vulnerabilities — run 'npm audit fix' to resolve"
+    fi
+}
+
+run_composer_audit() {
+    if [[ "$SKIP_AUDIT" == "1" ]]; then
+        warn "composer audit skipped (SENTINEL_SKIP_AUDIT=1)"
+        return 0
+    fi
+
+    if ! require composer "composer audit"; then return 0; fi
+
+    log "Running composer audit..."
+    if composer audit; then
+        ok "composer audit: no vulnerabilities found"
+    else
+        warn "composer audit reported vulnerabilities"
+    fi
+}
+
+# Resolve the target directory for git clone from its argument list.
+# Handles: git clone <url>, git clone <url> <dir>, git clone [opts] <url> [dir]
+git_clone_target_dir() {
+    local args=("$@")
+    local i
+
+    local positional=()
+    for (( i=0; i<${#args[@]}; i++ )); do
+        local arg="${args[$i]}"
+        if [[ "$arg" == --* ]]; then
+            case "$arg" in
+                --branch|--depth|--origin|--reference|--reference-if-able|\
+                --separate-git-dir|--upload-pack|--config|--jobs)
+                    (( i++ )) || true ;;
+            esac
+        elif [[ "$arg" == -* && ${#arg} -eq 2 ]]; then
+            case "$arg" in
+                -b|-o|-u|-j) (( i++ )) || true ;;
+            esac
+        else
+            positional+=("$arg")
+        fi
+    done
+
+    if [[ ${#positional[@]} -ge 2 ]]; then
+        echo "${positional[1]}"
+    elif [[ ${#positional[@]} -eq 1 ]]; then
+        local url="${positional[0]}"
+        url="${url%/}"
+        url="${url%.git}"
+        basename "$url"
+    else
+        echo "."
+    fi
+}
+
+handle_git() {
+    local git_cmd="${1:-}"
+    shift || true
+
+    log "Running: git ${git_cmd} $*"
+    command git "$git_cmd" "$@"
+    local exit_code=$?
+
+    if [[ $exit_code -ne 0 ]]; then
+        fail "git ${git_cmd} failed (exit ${exit_code})"
+        exit $exit_code
+    fi
+
+    local scan_dir
+    case "$git_cmd" in
+        clone)
+            scan_dir="$(git_clone_target_dir "$@")"
+            ;;
+        pull|fetch)
+            scan_dir="."
+            ;;
+        *)
+            exit 0
+            ;;
+    esac
+
+    echo ""
+    log "git ${git_cmd} complete — running ClamAV scan on '${scan_dir}'..."
+    echo ""
+
+    run_clamscan "$scan_dir" "$scan_dir" || { fail "Security scan failed."; exit 2; }
+    echo ""
+    ok "All scans complete."
+    exit 0
+}
+
+is_install_cmd() {
+    local manager="$1"
+    local cmd="$2"
+    case "$manager:$cmd" in
+        npm:install|npm:i|npm:ci|npm:update|npm:up)       return 0 ;;
+        composer:install|composer:update|composer:require) return 0 ;;
+    esac
+    return 1
+}
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+
+if [[ $# -lt 1 ]]; then
+    echo "Usage: sentinel <npm|composer|git> [args...]"
+    exit 1
+fi
+
+MANAGER="$1"
+shift
+
+case "$MANAGER" in
+    git) handle_git "$@" ;;
+    npm|composer) ;;
+    *)
+        echo "Unsupported manager: $MANAGER (use npm, composer, or git)"
+        exit 1
+        ;;
+esac
+
+log "Running: ${MANAGER} $*"
+"$MANAGER" "$@"
+CMD_EXIT=$?
+
+if [[ $CMD_EXIT -ne 0 ]]; then
+    fail "${MANAGER} command failed (exit ${CMD_EXIT})"
+    exit $CMD_EXIT
+fi
+
+if ! is_install_cmd "$MANAGER" "${1:-}"; then
+    exit 0
+fi
+
+echo ""
+log "Package installation detected — running security scans..."
+echo ""
+
+SCAN_FAILED=0
+
+case "$MANAGER" in
+    npm)
+        run_clamscan "./node_modules" "node_modules" || SCAN_FAILED=1
+        run_npm_audit || true
+        ;;
+    composer)
+        run_clamscan "./vendor" "vendor" || SCAN_FAILED=1
+        run_composer_audit || true
+        ;;
+esac
+
+echo ""
+if [[ $SCAN_FAILED -eq 1 ]]; then
+    fail "Security scan failed — review issues above before using these packages."
+    exit 2
+else
+    ok "All scans complete."
+fi
