@@ -37,3 +37,55 @@ composer() {
             ;;
     esac
 }
+
+curl() {
+    sentinel curl "$@"
+}
+
+wget() {
+    sentinel wget "$@"
+}
+
+tar() {
+    local first="${1:-}"
+    local is_extract=0
+
+    # Old-style (no leading dash): tar xf archive.tar.gz
+    if [[ "$first" != -* && "$first" == *x* ]]; then
+        is_extract=1
+    else
+        for arg in "$@"; do
+            case "$arg" in
+                --extract|--get) is_extract=1; break ;;
+                # Combined flags like -xzf or standalone -x
+                -*) [[ "$arg" == *x* ]] && { is_extract=1; break; } ;;
+            esac
+        done
+    fi
+
+    if [[ $is_extract -eq 1 ]]; then
+        sentinel tar "$@"
+    else
+        command tar "$@"
+    fi
+}
+
+unzip() {
+    sentinel unzip "$@"
+}
+
+function 7z {
+    local cmd="${1:-}"
+    case "$cmd" in
+        e|x) sentinel 7z "$@" ;;
+        *)   command 7z "$@" ;;
+    esac
+}
+
+function 7za {
+    local cmd="${1:-}"
+    case "$cmd" in
+        e|x) sentinel 7za "$@" ;;
+        *)   command 7za "$@" ;;
+    esac
+}

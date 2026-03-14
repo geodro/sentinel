@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
-# sentinel — Run package manager / git commands with ClamAV + audit scanning
+# sentinel — Run package manager / git / download / archive commands with ClamAV scanning
 #
 # Usage:
 #   sentinel npm install
 #   sentinel composer install
-#   sentinel npm i lodash
 #   sentinel git clone <url> [dir]
 #   sentinel git pull
+#   sentinel curl -o file.zip https://example.com/file.zip
+#   sentinel wget https://example.com/file.zip
+#   sentinel tar xf archive.tar.gz
+#   sentinel unzip archive.zip
+#   sentinel 7z x archive.7z
 #
 # Dependencies: clamav (clamscan), npm or composer
 
@@ -35,8 +39,9 @@ require() {
     fi
 }
 
+# Scan a file or directory with ClamAV. Works for both.
 run_clamscan() {
-    local dir="$1"
+    local path="$1"
     local label="$2"
 
     if [[ "$SKIP_CLAM" == "1" ]]; then
@@ -46,16 +51,17 @@ run_clamscan() {
 
     if ! require clamscan "ClamAV scan"; then return 0; fi
 
-    if [[ ! -d "$dir" ]]; then
-        warn "$dir not found, skipping ClamAV scan"
+    if [[ ! -e "$path" ]]; then
+        warn "'${path}' not found, skipping ClamAV scan"
         return 0
     fi
 
     log "Scanning ${label} with ClamAV..."
     mkdir -p "$QUARANTINE_DIR"
 
+    # -r recurses directories; passing -r with a single file is a no-op
     # shellcheck disable=SC2086
-    if clamscan -r "$dir" $CLAM_OPTS --move="$QUARANTINE_DIR"; then
+    if clamscan -r "$path" $CLAM_OPTS --move="$QUARANTINE_DIR"; then
         ok "ClamAV: no threats found in ${label}"
     else
         local exit_code=$?
@@ -101,6 +107,8 @@ run_composer_audit() {
     fi
 }
 
+# ── Argument parsers ──────────────────────────────────────────────────────────
+
 # Resolve the target directory for git clone from its argument list.
 # Handles: git clone <url>, git clone <url> <dir>, git clone [opts] <url> [dir]
 git_clone_target_dir() {
@@ -136,6 +144,173 @@ git_clone_target_dir() {
         echo "."
     fi
 }
+
+# Resolve curl's output file from its arguments.
+# Returns "" if curl is writing to stdout (no scan needed).
+curl_output_path() {
+    local args=("$@")
+    local i has_remote_name=0
+
+    for (( i=0; i<${#args[@]}; i++ )); do
+        local arg="${args[$i]}"
+        case "$arg" in
+            -o|--output)
+                (( i++ )) || true
+                echo "${args[$i]:-}"
+                return
+                ;;
+            --output=*)
+                echo "${arg#*=}"
+                return
+                ;;
+            -O|--remote-name|-J|--remote-header-name)
+                has_remote_name=1
+                ;;
+        esac
+    done
+
+    if [[ $has_remote_name -eq 1 ]]; then
+        # Prefer an explicit URL argument
+        for (( i=${#args[@]}-1; i>=0; i-- )); do
+            local arg="${args[$i]}"
+            if [[ "$arg" == http://* || "$arg" == https://* || "$arg" == ftp://* ]]; then
+                local name="${arg%%[?#]*}"
+                name="${name%/}"
+                basename "$name"
+                return
+            fi
+        done
+        # Fallback: last non-flag argument
+        for (( i=${#args[@]}-1; i>=0; i-- )); do
+            local arg="${args[$i]}"
+            if [[ "$arg" != -* ]]; then
+                local name="${arg%%[?#]*}"
+                name="${name%/}"
+                basename "$name"
+                return
+            fi
+        done
+    fi
+
+    echo ""
+}
+
+# Resolve wget's scan target (file or directory) from its arguments.
+# Returns "" if wget is writing to stdout (no scan needed).
+wget_scan_target() {
+    local args=("$@")
+    local i output="" prefix=""
+
+    for (( i=0; i<${#args[@]}; i++ )); do
+        local arg="${args[$i]}"
+        case "$arg" in
+            -O|--output-document)
+                (( i++ )) || true
+                output="${args[$i]:-}"
+                ;;
+            --output-document=*)
+                output="${arg#*=}"
+                ;;
+            -P|--directory-prefix)
+                (( i++ )) || true
+                prefix="${args[$i]:-}"
+                ;;
+            --directory-prefix=*)
+                prefix="${arg#*=}"
+                ;;
+        esac
+    done
+
+    # Explicit -O takes priority
+    if [[ -n "$output" ]]; then
+        [[ "$output" == "-" ]] && echo "" && return  # stdout, skip scan
+        echo "$output"
+        return
+    fi
+
+    # -P: scan that directory (wget saves files there)
+    if [[ -n "$prefix" ]]; then
+        echo "$prefix"
+        return
+    fi
+
+    # Derive filename from a proper URL only when it has a real path component.
+    # URLs like https://example.com/ or bare hostnames like www.google.com save
+    # as index.html, which we can't predict — fall back to scanning cwd.
+    for (( i=${#args[@]}-1; i>=0; i-- )); do
+        local arg="${args[$i]}"
+        if [[ "$arg" == http://* || "$arg" == https://* || "$arg" == ftp://* ]]; then
+            local url_no_proto="${arg#*://}"    # strip scheme://
+            if [[ "$url_no_proto" == */* ]]; then
+                local path_part="${url_no_proto#*/}"   # everything after first /
+                path_part="${path_part%%[?#]*}"        # strip query/fragment
+                path_part="${path_part%/}"             # strip trailing slash
+                local name
+                name="$(basename "$path_part")"
+                if [[ -n "$name" && "$name" != "." ]]; then
+                    echo "$name"
+                    return
+                fi
+            fi
+            break  # URL with no usable path → wget saves index.html → scan cwd
+        fi
+    done
+
+    echo "."
+}
+
+# Resolve tar's extraction target directory.
+tar_target_dir() {
+    local args=("$@")
+    local i
+    for (( i=0; i<${#args[@]}; i++ )); do
+        case "${args[$i]}" in
+            -C|--directory)
+                (( i++ )) || true
+                echo "${args[$i]:-}"
+                return
+                ;;
+            --directory=*)
+                echo "${args[$i]#*=}"
+                return
+                ;;
+        esac
+    done
+    echo "."
+}
+
+# Resolve unzip's extraction target directory.
+unzip_target_dir() {
+    local args=("$@")
+    local i
+    for (( i=0; i<${#args[@]}; i++ )); do
+        case "${args[$i]}" in
+            -d)
+                (( i++ )) || true
+                echo "${args[$i]:-}"
+                return
+                ;;
+        esac
+    done
+    echo "."
+}
+
+# Resolve 7z/7za extraction target directory.
+# 7z uses -o with no space: -o/path/to/dir
+sevenz_target_dir() {
+    local args=("$@")
+    for arg in "${args[@]}"; do
+        case "$arg" in
+            -o?*)
+                echo "${arg#-o}"
+                return
+                ;;
+        esac
+    done
+    echo "."
+}
+
+# ── Handlers ──────────────────────────────────────────────────────────────────
 
 handle_git() {
     local git_cmd="${1:-}"
@@ -173,6 +348,133 @@ handle_git() {
     exit 0
 }
 
+handle_curl() {
+    local output_path
+    output_path="$(curl_output_path "$@")"
+
+    if [[ -z "$output_path" ]]; then
+        # No file output (stdout or no -o/-O), run directly without scanning
+        command curl "$@"
+        exit $?
+    fi
+
+    log "Running: curl $*"
+    command curl "$@"
+    local exit_code=$?
+
+    if [[ $exit_code -ne 0 ]]; then
+        fail "curl failed (exit ${exit_code})"
+        exit $exit_code
+    fi
+
+    echo ""
+    log "Download complete — scanning '${output_path}'..."
+    echo ""
+
+    run_clamscan "$output_path" "$output_path" || { fail "Security scan failed."; exit 2; }
+    echo ""
+    ok "All scans complete."
+    exit 0
+}
+
+handle_wget() {
+    local scan_target
+    scan_target="$(wget_scan_target "$@")"
+
+    if [[ -z "$scan_target" ]]; then
+        # Writing to stdout, run directly
+        command wget "$@"
+        exit $?
+    fi
+
+    log "Running: wget $*"
+    command wget "$@"
+    local exit_code=$?
+
+    if [[ $exit_code -ne 0 ]]; then
+        fail "wget failed (exit ${exit_code})"
+        exit $exit_code
+    fi
+
+    echo ""
+    log "Download complete — scanning '${scan_target}'..."
+    echo ""
+
+    run_clamscan "$scan_target" "$scan_target" || { fail "Security scan failed."; exit 2; }
+    echo ""
+    ok "All scans complete."
+    exit 0
+}
+
+handle_tar() {
+    local target_dir
+    target_dir="$(tar_target_dir "$@")"
+
+    log "Running: tar $*"
+    command tar "$@"
+    local exit_code=$?
+
+    if [[ $exit_code -ne 0 ]]; then
+        fail "tar failed (exit ${exit_code})"
+        exit $exit_code
+    fi
+
+    echo ""
+    log "Extraction complete — scanning '${target_dir}'..."
+    echo ""
+
+    run_clamscan "$target_dir" "$target_dir" || { fail "Security scan failed."; exit 2; }
+    echo ""
+    ok "All scans complete."
+    exit 0
+}
+
+handle_unzip() {
+    local target_dir
+    target_dir="$(unzip_target_dir "$@")"
+
+    log "Running: unzip $*"
+    command unzip "$@"
+    local exit_code=$?
+
+    if [[ $exit_code -ne 0 ]]; then
+        fail "unzip failed (exit ${exit_code})"
+        exit $exit_code
+    fi
+
+    echo ""
+    log "Extraction complete — scanning '${target_dir}'..."
+    echo ""
+
+    run_clamscan "$target_dir" "$target_dir" || { fail "Security scan failed."; exit 2; }
+    echo ""
+    ok "All scans complete."
+    exit 0
+}
+
+handle_7z() {
+    local target_dir
+    target_dir="$(sevenz_target_dir "$@")"
+
+    log "Running: ${MANAGER} $*"
+    command "$MANAGER" "$@"
+    local exit_code=$?
+
+    if [[ $exit_code -ne 0 ]]; then
+        fail "${MANAGER} failed (exit ${exit_code})"
+        exit $exit_code
+    fi
+
+    echo ""
+    log "Extraction complete — scanning '${target_dir}'..."
+    echo ""
+
+    run_clamscan "$target_dir" "$target_dir" || { fail "Security scan failed."; exit 2; }
+    echo ""
+    ok "All scans complete."
+    exit 0
+}
+
 is_install_cmd() {
     local manager="$1"
     local cmd="$2"
@@ -183,10 +485,10 @@ is_install_cmd() {
     return 1
 }
 
-# ── Main ─────────────────────────────────────────────────────────────────────
+# ── Main ──────────────────────────────────────────────────────────────────────
 
 if [[ $# -lt 1 ]]; then
-    echo "Usage: sentinel <npm|composer|git> [args...]"
+    echo "Usage: sentinel <npm|composer|git|curl|wget|tar|unzip|7z|7za> [args...]"
     exit 1
 fi
 
@@ -194,10 +496,15 @@ MANAGER="$1"
 shift
 
 case "$MANAGER" in
-    git) handle_git "$@" ;;
+    git)          handle_git "$@" ;;
+    curl)         handle_curl "$@" ;;
+    wget)         handle_wget "$@" ;;
+    tar)          handle_tar "$@" ;;
+    unzip)        handle_unzip "$@" ;;
+    7z|7za)       handle_7z "$@" ;;
     npm|composer) ;;
     *)
-        echo "Unsupported manager: $MANAGER (use npm, composer, or git)"
+        echo "Unsupported: $MANAGER (supported: npm, composer, git, curl, wget, tar, unzip, 7z, 7za)"
         exit 1
         ;;
 esac

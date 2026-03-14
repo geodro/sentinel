@@ -10,8 +10,15 @@ Automatic ClamAV malware scanning and vulnerability auditing for `npm`, `compose
 | `composer install` / `composer update` / `composer require` | `vendor/` | `composer audit` |
 | `git clone <url>` | cloned directory | — |
 | `git pull` / `git fetch` | current directory | — |
+| `curl -o file …` / `curl -O <url>` | downloaded file | — |
+| `wget <url>` / `wget -O file …` | downloaded file | — |
+| `tar xf archive.tar.gz` (any extract) | extraction directory | — |
+| `unzip archive.zip` | extraction directory | — |
+| `7z x archive.7z` / `7za e archive.7z` | extraction directory | — |
 
 Infected files are quarantined (moved, not deleted). Audit warnings are non-fatal; malware detections block with a non-zero exit code.
+
+> **curl note:** only invocations that write to a file (`-o`/`--output` or `-O`/`--remote-name`) are scanned. Requests that stream to stdout pass through unwrapped.
 
 ---
 
@@ -104,6 +111,11 @@ composer install
 composer require guzzlehttp/guzzle
 git clone https://github.com/example/repo.git
 git pull
+curl -O https://example.com/tool.tar.gz
+wget https://example.com/tool.tar.gz
+tar xf tool.tar.gz
+unzip archive.zip
+7z x archive.7z
 ```
 
 You can also call sentinel directly:
@@ -112,6 +124,11 @@ You can also call sentinel directly:
 sentinel npm install
 sentinel composer install
 sentinel git clone https://github.com/example/repo.git
+sentinel curl -O https://example.com/tool.tar.gz
+sentinel wget https://example.com/tool.tar.gz
+sentinel tar xf tool.tar.gz
+sentinel unzip archive.zip
+sentinel 7z x archive.7z
 ```
 
 ---
@@ -169,9 +186,10 @@ freshclam --quiet
 rm ~/.local/bin/sentinel
 
 # Fish
-rm ~/.config/fish/functions/git.fish
-rm ~/.config/fish/functions/npm.fish
-rm ~/.config/fish/functions/composer.fish
+for fn in git npm composer curl wget tar unzip 7z 7za; do
+    rm -f ~/.config/fish/functions/$fn.fish
+done
+# Also remove the sentinel override block from ~/.config/fish/config.fish
 
 # Zsh — remove the source line from ~/.zshrc
 # Bash — remove the source line from ~/.bashrc

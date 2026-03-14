@@ -35,15 +35,34 @@ info "Detected shell: ${SHELL_NAME}"
 
 case "$SHELL_NAME" in
     fish)
-        FISH_FUNC_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/fish/functions"
+        FISH_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/fish"
+        FISH_FUNC_DIR="$FISH_CONFIG_DIR/functions"
+        FISH_CONFIG="$FISH_CONFIG_DIR/config.fish"
         mkdir -p "$FISH_FUNC_DIR"
         # Fish requires one function per file named after the function
-        for fn in git npm composer; do
+        for fn in git npm composer curl wget tar unzip 7z 7za; do
             grep -A 999 "^function ${fn} " "$REPO_DIR/shell/sentinel.fish" \
                 | awk '/^end$/{print; exit} {print}' \
                 > "$FISH_FUNC_DIR/${fn}.fish"
         done
         ok "Fish functions written to ${FISH_FUNC_DIR}"
+        # Source wrappers explicitly in config.fish so they override any system
+        # aliases (e.g. distro configs that define 'alias wget=wget -c').
+        if grep -q 'sentinel.*override system aliases' "$FISH_CONFIG" 2>/dev/null; then
+            warn "sentinel override block already in ${FISH_CONFIG} — skipping"
+        else
+            cat >> "$FISH_CONFIG" << 'EOF'
+
+# sentinel — override system aliases so wrappers take effect
+for __sentinel_fn in git npm composer curl wget tar unzip 7z 7za
+    if test -f "$HOME/.config/fish/functions/$__sentinel_fn.fish"
+        source "$HOME/.config/fish/functions/$__sentinel_fn.fish"
+    end
+end
+set -e __sentinel_fn
+EOF
+            ok "Appended override block to ${FISH_CONFIG}"
+        fi
         ok "Reload with: exec fish"
         ;;
     zsh)
