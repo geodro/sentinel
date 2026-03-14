@@ -23,15 +23,13 @@ cp "$REPO_DIR/sentinel" "$INSTALL_DIR/sentinel"
 chmod +x "$INSTALL_DIR/sentinel"
 ok "sentinel installed to ${INSTALL_DIR}/sentinel"
 
-# Check it's on PATH
-if ! echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; then
-    warn "${INSTALL_DIR} is not in your PATH — add it to your shell config"
-fi
-
-# ── Shell wrappers ────────────────────────────────────────────────────────────
+# ── Shell wrappers + PATH setup ───────────────────────────────────────────────
 
 SHELL_NAME="$(basename "${SHELL:-bash}")"
 info "Detected shell: ${SHELL_NAME}"
+
+# Helper: check if INSTALL_DIR is currently on PATH
+_in_path() { echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; }
 
 case "$SHELL_NAME" in
     fish)
@@ -46,6 +44,17 @@ case "$SHELL_NAME" in
                 > "$FISH_FUNC_DIR/${fn}.fish"
         done
         ok "Fish functions written to ${FISH_FUNC_DIR}"
+        # Add INSTALL_DIR to fish_user_paths if not already on PATH
+        if ! _in_path; then
+            if grep -q "fish_add_path.*${INSTALL_DIR}" "$FISH_CONFIG" 2>/dev/null; then
+                warn "${INSTALL_DIR} PATH entry already in ${FISH_CONFIG} — skipping"
+            else
+                echo "" >> "$FISH_CONFIG"
+                echo "# sentinel — ensure install dir is on PATH" >> "$FISH_CONFIG"
+                echo "fish_add_path \"${INSTALL_DIR}\"" >> "$FISH_CONFIG"
+                ok "Added ${INSTALL_DIR} to PATH via fish_add_path in ${FISH_CONFIG}"
+            fi
+        fi
         # Source wrappers explicitly in config.fish so they override any system
         # aliases (e.g. distro configs that define 'alias wget=wget -c').
         if grep -q 'sentinel.*override system aliases' "$FISH_CONFIG" 2>/dev/null; then
@@ -67,6 +76,16 @@ EOF
         ;;
     zsh)
         ZSHRC="${ZDOTDIR:-$HOME}/.zshrc"
+        if ! _in_path; then
+            if grep -q "PATH.*${INSTALL_DIR}" "$ZSHRC" 2>/dev/null; then
+                warn "${INSTALL_DIR} PATH entry already in ${ZSHRC} — skipping"
+            else
+                echo "" >> "$ZSHRC"
+                echo "# sentinel — ensure install dir is on PATH" >> "$ZSHRC"
+                echo "export PATH=\"${INSTALL_DIR}:\$PATH\"" >> "$ZSHRC"
+                ok "Added ${INSTALL_DIR} to PATH in ${ZSHRC}"
+            fi
+        fi
         if grep -q 'sentinel.zsh' "$ZSHRC" 2>/dev/null; then
             warn "sentinel already sourced in ${ZSHRC} — skipping"
         else
@@ -79,6 +98,16 @@ EOF
         ;;
     bash)
         BASHRC="$HOME/.bashrc"
+        if ! _in_path; then
+            if grep -q "PATH.*${INSTALL_DIR}" "$BASHRC" 2>/dev/null; then
+                warn "${INSTALL_DIR} PATH entry already in ${BASHRC} — skipping"
+            else
+                echo "" >> "$BASHRC"
+                echo "# sentinel — ensure install dir is on PATH" >> "$BASHRC"
+                echo "export PATH=\"${INSTALL_DIR}:\$PATH\"" >> "$BASHRC"
+                ok "Added ${INSTALL_DIR} to PATH in ${BASHRC}"
+            fi
+        fi
         if grep -q 'sentinel.bash' "$BASHRC" 2>/dev/null; then
             warn "sentinel already sourced in ${BASHRC} — skipping"
         else
@@ -91,6 +120,9 @@ EOF
         ;;
     *)
         warn "Unknown shell '${SHELL_NAME}' — manually source the appropriate file from shell/"
+        if ! _in_path; then
+            warn "Also add ${INSTALL_DIR} to your PATH"
+        fi
         ;;
 esac
 
