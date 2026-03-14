@@ -31,6 +31,8 @@ info "Detected shell: ${SHELL_NAME}"
 # Helper: check if INSTALL_DIR is currently on PATH
 _in_path() { echo "$PATH" | tr ':' '\n' | grep -qx "$INSTALL_DIR"; }
 
+RELOAD_CMD=""
+
 case "$SHELL_NAME" in
     fish)
         FISH_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/fish"
@@ -54,6 +56,8 @@ case "$SHELL_NAME" in
                 echo "fish_add_path \"${INSTALL_DIR}\"" >> "$FISH_CONFIG"
                 ok "Added ${INSTALL_DIR} to PATH via fish_add_path in ${FISH_CONFIG}"
             fi
+            # Make PATH available for the remainder of this script
+            export PATH="$INSTALL_DIR:$PATH"
         fi
         # Source wrappers explicitly in config.fish so they override any system
         # aliases (e.g. distro configs that define 'alias wget=wget -c').
@@ -72,7 +76,7 @@ set -e __sentinel_fn
 EOF
             ok "Appended override block to ${FISH_CONFIG}"
         fi
-        ok "Reload with: exec fish"
+        RELOAD_CMD="exec fish"
         ;;
     zsh)
         ZSHRC="${ZDOTDIR:-$HOME}/.zshrc"
@@ -85,6 +89,8 @@ EOF
                 echo "export PATH=\"${INSTALL_DIR}:\$PATH\"" >> "$ZSHRC"
                 ok "Added ${INSTALL_DIR} to PATH in ${ZSHRC}"
             fi
+            # Make PATH available for the remainder of this script
+            export PATH="$INSTALL_DIR:$PATH"
         fi
         if grep -q 'sentinel.zsh' "$ZSHRC" 2>/dev/null; then
             warn "sentinel already sourced in ${ZSHRC} — skipping"
@@ -93,8 +99,8 @@ EOF
             echo "# sentinel shell wrappers" >> "$ZSHRC"
             echo "source \"${REPO_DIR}/shell/sentinel.zsh\"" >> "$ZSHRC"
             ok "Appended source line to ${ZSHRC}"
-            ok "Reload with: source ${ZSHRC}"
         fi
+        RELOAD_CMD="source ${ZSHRC}"
         ;;
     bash)
         BASHRC="$HOME/.bashrc"
@@ -107,6 +113,8 @@ EOF
                 echo "export PATH=\"${INSTALL_DIR}:\$PATH\"" >> "$BASHRC"
                 ok "Added ${INSTALL_DIR} to PATH in ${BASHRC}"
             fi
+            # Make PATH available for the remainder of this script
+            export PATH="$INSTALL_DIR:$PATH"
         fi
         if grep -q 'sentinel.bash' "$BASHRC" 2>/dev/null; then
             warn "sentinel already sourced in ${BASHRC} — skipping"
@@ -115,16 +123,20 @@ EOF
             echo "# sentinel shell wrappers" >> "$BASHRC"
             echo "source \"${REPO_DIR}/shell/sentinel.bash\"" >> "$BASHRC"
             ok "Appended source line to ${BASHRC}"
-            ok "Reload with: source ${BASHRC}"
         fi
+        RELOAD_CMD="source ${BASHRC}"
         ;;
     *)
         warn "Unknown shell '${SHELL_NAME}' — manually source the appropriate file from shell/"
         if ! _in_path; then
             warn "Also add ${INSTALL_DIR} to your PATH"
+            export PATH="$INSTALL_DIR:$PATH"
         fi
         ;;
 esac
 
 echo ""
 ok "Done. Run 'sentinel --help' or see README.md for usage."
+if [[ -n "$RELOAD_CMD" ]]; then
+    ok "Reload your shell to apply changes: ${RELOAD_CMD}"
+fi
