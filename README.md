@@ -101,8 +101,10 @@ freshclam
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/geodro/sentinel/main/install.sh)"
 
 # wget
-bash -c "$(wget -qO- https://raw.githubusercontent.com/geodro/sentinel/main/install.sh)"
+bash -c "$(\wget -qO- https://raw.githubusercontent.com/geodro/sentinel/main/install.sh)"
 ```
+
+> **Note:** The `\` before `wget` bypasses sentinel's own shell wrapper. Without it, if sentinel is already installed, the wrapper intercepts the call and may fail if `~/.local/bin` is not yet on `PATH`.
 
 ### From a local clone
 
