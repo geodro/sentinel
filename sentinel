@@ -631,7 +631,8 @@ is_install_cmd() {
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 if [[ $# -lt 1 ]]; then
-    echo "Usage: sentinel <npm|composer|git|curl|wget|tar|unzip|7z|7za> [args...]"
+    echo "Usage: sentinel <command> [args...]"
+    echo "Run 'sentinel --help' for more information."
     exit 1
 fi
 
@@ -639,6 +640,39 @@ MANAGER="$1"
 shift
 
 case "$MANAGER" in
+    -h|--help)
+        cat <<'EOF'
+sentinel — malware scanner for package installs, downloads, and archives
+
+Usage:
+  sentinel <command> [args...]
+
+Commands:
+  npm <install|i|ci|update|up> [args...]   Scan node_modules after install
+  composer <install|update|require> [args...] Scan vendor/ after install
+  git clone <url> [dir]                    Scan cloned directory
+  git pull / git fetch                     Scan current directory
+  curl -o <file> <url>                     Scan downloaded file
+  wget <url>                               Scan downloaded file
+  tar xf <archive> [-C <dir>]             Scan extraction directory
+  unzip <archive> [-d <dir>]              Scan extraction directory
+  7z x <archive> [-o<dir>]               Scan extraction directory
+
+Environment variables:
+  SENTINEL_QUARANTINE   Directory for quarantined files (default: /tmp/sentinel-quarantine)
+  SENTINEL_CLAM_OPTS    Custom flags passed to clamscan (overrides all defaults)
+  SENTINEL_SKIP_CLAM    Set to 1 to skip ClamAV scanning
+  SENTINEL_SKIP_AUDIT   Set to 1 to skip npm/composer audit
+
+Exit codes:
+  0  Clean
+  1  The wrapped command itself failed
+  2  Malware detected — infected files quarantined
+
+See README.md for full documentation.
+EOF
+        exit 0
+        ;;
     git)          handle_git "$@" ;;
     curl)         handle_curl "$@" ;;
     wget)         handle_wget "$@" ;;
