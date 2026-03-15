@@ -274,16 +274,24 @@ fi
 
 echo ""
 printf "    Update ClamAV signatures now? (recommended) [Y/n]: "
-read -r _freshclam_ans </dev/tty || _freshclam_ans=""
+# Try /dev/tty (works when exec'd), fall back to stdin, fall back to empty.
+read -r _freshclam_ans </dev/tty 2>/dev/null \
+    || read -r _freshclam_ans 2>/dev/null \
+    || _freshclam_ans=""
+echo ""
 case "${_freshclam_ans,,}" in
     ""|y|yes)
         if [[ "$(uname -s)" == Darwin ]]; then
-            freshclam
+            freshclam || warn "freshclam failed — run it manually to update signatures."
+        elif systemctl is-active --quiet clamav-freshclam 2>/dev/null; then
+            # On Debian/Ubuntu the freshclam daemon owns the lock; restart the service instead.
+            sudo systemctl restart clamav-freshclam \
+                || warn "Restart failed — try: sudo systemctl restart clamav-freshclam"
         else
-            sudo freshclam
+            sudo freshclam || warn "freshclam failed — run 'sudo freshclam' manually."
         fi
         ;;
     *)
-        warn "Skipping signature update — run 'sudo freshclam' to update manually."
+        warn "Skipping — run 'sudo freshclam' to update signatures manually."
         ;;
 esac
