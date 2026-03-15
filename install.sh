@@ -89,7 +89,7 @@ _check_prereq() {
     printf "%s" "$prompt"
     read -r ans </dev/tty || ans=""
 
-    case "${ans,,}" in
+    case "$(echo "$ans" | tr '[:upper:]' '[:lower:]')" in
         ""|y|yes)
             if [[ -n "$install_cmd" ]]; then
                 echo ""
@@ -279,7 +279,7 @@ read -r _freshclam_ans </dev/tty 2>/dev/null \
     || read -r _freshclam_ans 2>/dev/null \
     || _freshclam_ans=""
 echo ""
-case "${_freshclam_ans,,}" in
+case "$(echo "$_freshclam_ans" | tr '[:upper:]' '[:lower:]')" in
     ""|y|yes)
         if [[ "$(uname -s)" == Darwin ]]; then
             freshclam || warn "freshclam failed — run it manually to update signatures."
