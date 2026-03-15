@@ -658,6 +658,7 @@ Commands:
   unzip <archive> [-d <dir>]                  Scan extraction directory
   7z x <archive> [-o<dir>]                    Scan extraction directory
   update                                       Update sentinel to the latest version
+  uninstall                                    Remove sentinel and its shell wrappers
 
 Environment variables:
   SENTINEL_QUARANTINE   Directory for quarantined files (default: /tmp/sentinel-quarantine)
@@ -673,6 +674,21 @@ Exit codes:
 See README.md for full documentation.
 EOF
         exit 0
+        ;;
+    uninstall)
+        UNINSTALL_URL="https://raw.githubusercontent.com/geodro/sentinel/main/uninstall.sh"
+        echo "[sentinel] Starting uninstall..."
+        TMP="$(mktemp /tmp/sentinel-uninstall.XXXXXX.sh)"
+        trap 'rm -f "$TMP"' EXIT
+        if command -v curl &>/dev/null; then
+            command curl -fsSL "$UNINSTALL_URL" -o "$TMP"
+        elif command -v wget &>/dev/null; then
+            command wget -qO "$TMP" "$UNINSTALL_URL"
+        else
+            echo "[sentinel] Error: curl or wget is required to uninstall."
+            exit 1
+        fi
+        exec bash "$TMP"
         ;;
     update)
         INSTALL_URL="https://raw.githubusercontent.com/geodro/sentinel/main/install.sh"

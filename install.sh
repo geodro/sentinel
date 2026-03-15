@@ -131,6 +131,7 @@ if [[ ! -f "$REPO_DIR/sentinel" ]] || [[ ! -d "$REPO_DIR/shell" ]]; then
         }
     }
     _download sentinel
+    _download uninstall.sh
     _download shell/sentinel.bash
     _download shell/sentinel.zsh
     _download shell/sentinel.fish

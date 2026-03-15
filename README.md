@@ -351,14 +351,7 @@ freshclam --quiet
 ## Uninstall
 
 ```bash
-rm ~/.local/bin/sentinel
-
-# Fish
-for fn in git npm composer curl wget tar unzip 7z 7za; do
-    rm -f ~/.config/fish/functions/$fn.fish
-done
-# Also remove the sentinel override block from ~/.config/fish/config.fish
-
-# Zsh — remove the source line from ~/.zshrc
-# Bash — remove the source line from ~/.bashrc
+sentinel uninstall
 ```
+
+This removes the binary, shell wrappers, and the `~/.local/share/sentinel` directory, and cleans up any lines sentinel added to your shell config.
