@@ -97,7 +97,11 @@ freshclam
 ### One-liner
 
 ```bash
+# curl
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/geodro/sentinel/main/install.sh)"
+
+# wget
+bash -c "$(wget -qO- https://raw.githubusercontent.com/geodro/sentinel/main/install.sh)"
 ```
 
 ### From a local clone
