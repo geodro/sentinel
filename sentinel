@@ -648,15 +648,16 @@ Usage:
   sentinel <command> [args...]
 
 Commands:
-  npm <install|i|ci|update|up> [args...]   Scan node_modules after install
-  composer <install|update|require> [args...] Scan vendor/ after install
-  git clone <url> [dir]                    Scan cloned directory
-  git pull / git fetch                     Scan current directory
-  curl -o <file> <url>                     Scan downloaded file
-  wget <url>                               Scan downloaded file
-  tar xf <archive> [-C <dir>]             Scan extraction directory
-  unzip <archive> [-d <dir>]              Scan extraction directory
-  7z x <archive> [-o<dir>]               Scan extraction directory
+  npm <install|i|ci|update|up> [args...]      Scan node_modules after install
+  composer <install|update|require> [args...]  Scan vendor/ after install
+  git clone <url> [dir]                        Scan cloned directory
+  git pull / git fetch                         Scan current directory
+  curl -o <file> <url>                         Scan downloaded file
+  wget <url>                                   Scan downloaded file
+  tar xf <archive> [-C <dir>]                 Scan extraction directory
+  unzip <archive> [-d <dir>]                  Scan extraction directory
+  7z x <archive> [-o<dir>]                    Scan extraction directory
+  update                                       Update sentinel to the latest version
 
 Environment variables:
   SENTINEL_QUARANTINE   Directory for quarantined files (default: /tmp/sentinel-quarantine)
@@ -672,6 +673,18 @@ Exit codes:
 See README.md for full documentation.
 EOF
         exit 0
+        ;;
+    update)
+        INSTALL_URL="https://raw.githubusercontent.com/geodro/sentinel/main/install.sh"
+        echo "[sentinel] Updating sentinel..."
+        if command -v curl &>/dev/null; then
+            bash -c "$(command curl -fsSL "$INSTALL_URL")"
+        elif command -v wget &>/dev/null; then
+            bash -c "$(command wget -qO- "$INSTALL_URL")"
+        else
+            echo "[sentinel] Error: curl or wget is required to update sentinel."
+            exit 1
+        fi
         ;;
     git)          handle_git "$@" ;;
     curl)         handle_curl "$@" ;;
