@@ -685,6 +685,7 @@ EOF
             echo "[sentinel] Error: curl or wget is required to update sentinel."
             exit 1
         fi
+        exit 0
         ;;
     git)          handle_git "$@" ;;
     curl)         handle_curl "$@" ;;
