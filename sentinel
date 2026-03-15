@@ -677,15 +677,19 @@ EOF
     update)
         INSTALL_URL="https://raw.githubusercontent.com/geodro/sentinel/main/install.sh"
         echo "[sentinel] Updating sentinel..."
+        # Download install.sh to a temp file then exec it, replacing this process.
+        # This avoids bash re-reading the sentinel file after install.sh overwrites it.
+        TMP="$(mktemp /tmp/sentinel-install.XXXXXX.sh)"
+        trap 'rm -f "$TMP"' EXIT
         if command -v curl &>/dev/null; then
-            bash -c "$(command curl -fsSL "$INSTALL_URL")"
+            command curl -fsSL "$INSTALL_URL" -o "$TMP"
         elif command -v wget &>/dev/null; then
-            bash -c "$(command wget -qO- "$INSTALL_URL")"
+            command wget -qO "$TMP" "$INSTALL_URL"
         else
             echo "[sentinel] Error: curl or wget is required to update sentinel."
             exit 1
         fi
-        exit 0
+        exec bash "$TMP"
         ;;
     git)          handle_git "$@" ;;
     curl)         handle_curl "$@" ;;

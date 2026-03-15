@@ -96,13 +96,13 @@ freshclam
 
 ### One-liner
 
-```bash
 # curl
+```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/geodro/sentinel/main/install.sh)"
 ```
 
-```bash
 # wget
+```bash
 bash -c "$(command wget -qO- https://raw.githubusercontent.com/geodro/sentinel/main/install.sh)"
 ```
 
