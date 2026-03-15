@@ -268,3 +268,20 @@ ok "Done. Run 'sentinel --help' or see README.md for usage."
 if [[ -n "$RELOAD_CMD" ]]; then
     ok "Reload your shell to apply changes: ${RELOAD_CMD}"
 fi
+
+# ── ClamAV signature update ───────────────────────────────────────────────────
+
+echo ""
+read -rp "$(echo -e "    Update ClamAV signatures now? (recommended) [Y/n]: ")" _freshclam_ans
+case "${_freshclam_ans,,}" in
+    ""|y|yes)
+        if [[ "$(uname -s)" == Darwin ]]; then
+            freshclam
+        else
+            sudo freshclam
+        fi
+        ;;
+    *)
+        warn "Skipping signature update — run 'sudo freshclam' to update manually."
+        ;;
+esac
