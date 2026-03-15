@@ -46,7 +46,9 @@ _pkg_manager() {
 _install_cmd() {
     local cmd="$1" mgr="$2"
     case "$mgr:$cmd" in
-        brew:clamscan)   echo "brew install clamav && freshclam" ;;
+        brew:clamscan)
+            echo 'brew install clamav && BREW_PREFIX="$(brew --prefix)" && cp "${BREW_PREFIX}/etc/clamav/freshclam.conf.sample" "${BREW_PREFIX}/etc/clamav/freshclam.conf" && sed -i "" "s/^Example$//" "${BREW_PREFIX}/etc/clamav/freshclam.conf" && freshclam'
+            ;;
         brew:jq)         echo "brew install jq" ;;
         apt:clamscan)    echo "sudo apt install -y clamav clamav-daemon && sudo freshclam" ;;
         apt:jq)          echo "sudo apt install -y jq" ;;
