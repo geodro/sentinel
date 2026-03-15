@@ -2,6 +2,26 @@
 
 Automatic malware scanning and vulnerability auditing for package installs, git operations, downloads, and archive extraction. Sentinel wraps common shell commands so every operation that brings new code onto your machine is scanned transparently — no change to your workflow required.
 
+## Why sentinel instead of on-access scanning?
+
+On-access scanning (e.g. ClamAV's `clamd` with `OnAccessScanning`, or antivirus kernel modules) scans every file the moment it is read or written — including every file your build tools, editors, and package managers touch during normal work. The performance cost is significant:
+
+- A typical `node_modules` tree has 50,000–200,000 files. On-access scanning means every `webpack`, `tsc`, or `eslint` run triggers tens of thousands of scan events, adding seconds or minutes to each build.
+- `vendor/` in a PHP project, `.gradle/` caches, and similar directories have the same problem.
+- On Linux, on-access scanning requires `fanotify`, which needs root or `CAP_SYS_ADMIN` — not suitable for developer workstations.
+- A background daemon consumes CPU and memory continuously, even when nothing security-relevant is happening.
+
+Sentinel takes a different approach: **scan once, at the moment new code arrives**. The threat window is `npm install` or `git clone`, not `npm run build`. By intercepting only the operations that fetch external code, sentinel:
+
+- Adds scan time only when something is actually downloaded or installed — normal builds, tests, and editor operations have zero overhead.
+- Requires no root privileges, no kernel modules, and no background daemon.
+- Knows exactly what changed (the freshly installed or extracted files), so it scans a precise target rather than the entire filesystem.
+- Works transparently inside existing workflows — no wrapper scripts or CI config changes needed beyond installation.
+
+The trade-off is that sentinel is not a substitute for full system protection. It covers the highest-risk moment in a developer workflow (pulling untrusted code from the internet) while keeping day-to-day performance unaffected.
+
+---
+
 ## How it works
 
 Shell wrappers intercept specific subcommands and route them through the `sentinel` binary, which runs the original command and then scans what was fetched. Non-intercepted subcommands (e.g. `git status`, `npm run build`, `tar cf ...`) pass straight through to the real binary with zero overhead.
