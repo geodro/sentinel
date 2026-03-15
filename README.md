@@ -14,8 +14,8 @@ Infected files are **moved** to a quarantine directory (not deleted). Malware de
 
 | Command | Intercepts | ClamAV scan | Audit |
 |---|---|---|---|
-| `npm install` / `i` / `ci` / `update` / `up` | install operations only | `node_modules/` | `npm audit` |
-| `composer install` / `update` / `require` | install operations only | `vendor/` | `composer audit` |
+| `npm install` / `i` / `ci` / `update` / `up` | install operations only | `node_modules/` + project tree¹ | `npm audit` |
+| `composer install` / `update` / `require` | install operations only | `vendor/` + script files² + project tree³ | `composer audit` |
 | `git clone <url>` | clone only | cloned directory | — |
 | `git pull` / `git fetch` | pull/fetch only | current directory | — |
 | `curl -o file …` / `curl -O <url>` | file-writing invocations only | downloaded file | — |
@@ -23,6 +23,12 @@ Infected files are **moved** to a quarantine directory (not deleted). Malware de
 | `tar xf …` / `tar -xzf …` / `tar --extract` | extract operations only | extraction directory | — |
 | `unzip archive.zip` | all invocations | extraction directory | — |
 | `7z x …` / `7za e …` | extract operations (`x`/`e`) only | extraction directory | — |
+
+**¹ npm project tree** — after install, any file written outside `node_modules/` and `.git/` during the run (e.g. by a `postinstall` script dropping files into `dist/` or `public/`) is detected via timestamp comparison and scanned.
+
+**² composer script files** — file-path entries in the `scripts` section of `composer.json` and `vendor/composer/installed.json` are scanned individually after install. PHP callables (`Vendor\Pkg::method`) and `@`-aliases are covered by the `vendor/` scan. Requires `jq`.
+
+**³ composer project tree** — same timestamp approach as npm: any file written outside `vendor/` and `.git/` during the install run is scanned. This catches `vendor:publish` output (`config/`, `resources/views/vendor/`, `lang/`, `public/`, `database/migrations/`, etc.) regardless of which command produced it.
 
 **curl/wget note:** invocations that stream to stdout (`curl` without `-o`/`-O`, `wget -O -`) pass through unwrapped — there is no file to scan.
 
@@ -56,6 +62,18 @@ sudo freshclam
 composer --version   # must be >= 2.4
 ```
 
+**jq** (required for composer script scanning) — enables scanning of file-path entries in composer `scripts`:
+```bash
+# Debian / Ubuntu
+sudo apt install jq
+
+# Arch / CachyOS
+sudo pacman -S jq
+
+# Fedora / RHEL
+sudo dnf install jq
+```
+
 ### macOS
 
 **ClamAV** via Homebrew:
@@ -69,6 +87,8 @@ freshclam
 **npm** — install via [Node.js](https://nodejs.org) or `brew install node`.
 
 **composer** — install via `brew install composer` (must be >= 2.4 for `composer audit`).
+
+**jq** (required for composer script scanning) — `brew install jq`.
 
 ---
 
@@ -264,7 +284,7 @@ definitions:
 | Topic | Detail |
 |---|---|
 | Signature update time | `freshclam` adds ~1–2 min on a cold cache. Cache `/var/lib/clamav` between runs to avoid this. |
-| Scan time | Large `node_modules` trees can be slow. Tune with `SENTINEL_CLAM_OPTS`. |
+| Scan time | Large `node_modules`/`vendor` trees can be slow. Tune with `SENTINEL_CLAM_OPTS`. Project-tree scans only cover files written during the install run, so they are typically fast. |
 | Audit exit codes | `npm audit` / `composer audit` are non-fatal (warnings only). |
 | Malware detection | Exit code `2` — the build fails automatically. |
 | Skipping checks | `SENTINEL_SKIP_CLAM=1` or `SENTINEL_SKIP_AUDIT=1` to bypass individual steps. |
