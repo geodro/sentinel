@@ -4,7 +4,13 @@
 set -euo pipefail
 
 INSTALL_DIR="${SENTINEL_INSTALL_DIR:-$HOME/.local/bin}"
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SHARE_DIR="${SENTINEL_SHARE_DIR:-$HOME/.local/share/sentinel}"
+REPO_URL="https://raw.githubusercontent.com/geodro/sentinel/main"
+
+# When run via the one-liner (bash -c "$(curl ...)"), BASH_SOURCE[0] is not a
+# real file path, so REPO_DIR resolves to the current directory.  Detect this
+# and download the necessary files to SHARE_DIR instead.
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd || pwd)"
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -16,8 +22,6 @@ info()  { echo -e "${BOLD}==> $*${RESET}"; }
 ok()    { echo -e "${GREEN}    $*${RESET}"; }
 warn()  { echo -e "${YELLOW}    WARNING: $*${RESET}"; }
 error() { echo -e "${RED}    ERROR: $*${RESET}"; }
-
-# ── Prerequisites ─────────────────────────────────────────────────────────────
 
 # Detect the system package manager.
 _pkg_manager() {
@@ -109,6 +113,30 @@ _check_prereq() {
     esac
     echo ""
 }
+
+# ── Remote download (one-liner install) ───────────────────────────────────────
+
+# If the sentinel binary isn't next to this script we're running remotely.
+# Download all required files to SHARE_DIR so they persist after install.
+if [[ ! -f "$REPO_DIR/sentinel" ]] || [[ ! -d "$REPO_DIR/shell" ]]; then
+    info "Downloading sentinel..."
+    mkdir -p "$SHARE_DIR/shell"
+    _download() {
+        curl -fsSL "${REPO_URL}/$1" -o "${SHARE_DIR}/$1" || {
+            error "Failed to download $1"
+            exit 1
+        }
+    }
+    _download sentinel
+    _download shell/sentinel.bash
+    _download shell/sentinel.zsh
+    _download shell/sentinel.fish
+    chmod +x "$SHARE_DIR/sentinel"
+    ok "Downloaded to ${SHARE_DIR}"
+    REPO_DIR="$SHARE_DIR"
+fi
+
+# ── Prerequisites ──────────────────────────────────────────────────────────────
 
 info "Checking prerequisites..."
 PKG_MGR="$(_pkg_manager)"

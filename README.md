@@ -94,6 +94,14 @@ freshclam
 
 ## Installation
 
+### One-liner
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/geodro/sentinel/main/install.sh)"
+```
+
+### From a local clone
+
 ```bash
 git clone https://github.com/geodro/sentinel.git
 cd sentinel
