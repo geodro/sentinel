@@ -1,24 +1,32 @@
 # sentinel
 
-Automatic ClamAV malware scanning and vulnerability auditing for `npm`, `composer`, and `git` operations. Wraps your shell commands so every install, clone, or pull is scanned transparently.
+Automatic malware scanning and vulnerability auditing for package installs, git operations, downloads, and archive extraction. Sentinel wraps common shell commands so every operation that brings new code onto your machine is scanned transparently — no change to your workflow required.
 
-## What it does
+## How it works
 
-| Command | ClamAV scan | Audit |
-|---|---|---|
-| `npm install` / `npm i` / `npm ci` / `npm update` | `node_modules/` | `npm audit` |
-| `composer install` / `composer update` / `composer require` | `vendor/` | `composer audit` |
-| `git clone <url>` | cloned directory | — |
-| `git pull` / `git fetch` | current directory | — |
-| `curl -o file …` / `curl -O <url>` | downloaded file | — |
-| `wget <url>` / `wget -O file …` | downloaded file | — |
-| `tar xf archive.tar.gz` (any extract) | extraction directory | — |
-| `unzip archive.zip` | extraction directory | — |
-| `7z x archive.7z` / `7za e archive.7z` | extraction directory | — |
+Shell wrappers intercept specific subcommands and route them through the `sentinel` binary, which runs the original command and then scans what was fetched. Non-intercepted subcommands (e.g. `git status`, `npm run build`, `tar cf ...`) pass straight through to the real binary with zero overhead.
 
-Infected files are quarantined (moved, not deleted). Audit warnings are non-fatal; malware detections block with a non-zero exit code.
+ClamAV is used for malware detection, running with both signature matching and heuristic analysis (packed/obfuscated executables, phishing content, potentially unwanted programs). For npm and composer, a vulnerability audit is also run after every install.
 
-> **curl note:** only invocations that write to a file (`-o`/`--output` or `-O`/`--remote-name`) are scanned. Requests that stream to stdout pass through unwrapped.
+Infected files are **moved** to a quarantine directory (not deleted). Malware detections exit with code `2`, failing the operation. Audit warnings are non-fatal.
+
+## What gets scanned
+
+| Command | Intercepts | ClamAV scan | Audit |
+|---|---|---|---|
+| `npm install` / `i` / `ci` / `update` / `up` | install operations only | `node_modules/` | `npm audit` |
+| `composer install` / `update` / `require` | install operations only | `vendor/` | `composer audit` |
+| `git clone <url>` | clone only | cloned directory | — |
+| `git pull` / `git fetch` | pull/fetch only | current directory | — |
+| `curl -o file …` / `curl -O <url>` | file-writing invocations only | downloaded file | — |
+| `wget <url>` | file-writing invocations only | downloaded file or directory | — |
+| `tar xf …` / `tar -xzf …` / `tar --extract` | extract operations only | extraction directory | — |
+| `unzip archive.zip` | all invocations | extraction directory | — |
+| `7z x …` / `7za e …` | extract operations (`x`/`e`) only | extraction directory | — |
+
+**curl/wget note:** invocations that stream to stdout (`curl` without `-o`/`-O`, `wget -O -`) pass through unwrapped — there is no file to scan.
+
+**tar/7z note:** create and list operations pass through directly; only extract operations are intercepted.
 
 ---
 
@@ -53,7 +61,6 @@ composer --version   # must be >= 2.4
 **ClamAV** via Homebrew:
 ```bash
 brew install clamav
-# Copy the sample config and update signatures
 cp /opt/homebrew/etc/clamav/freshclam.conf.sample /opt/homebrew/etc/clamav/freshclam.conf
 sed -i '' 's/^Example$//' /opt/homebrew/etc/clamav/freshclam.conf
 freshclam
@@ -76,17 +83,11 @@ bash install.sh
 The installer:
 1. Copies `sentinel` to `~/.local/bin/` (configurable via `SENTINEL_INSTALL_DIR`)
 2. Detects your shell and installs the appropriate wrappers automatically
+3. Adds `~/.local/bin` to `PATH` in your shell config if it isn't there already
 
 ### Manual shell setup
 
-If you prefer to set up wrappers yourself:
-
-**Fish** — copy each function into `~/.config/fish/functions/`:
-```bash
-# The file must be named after the function
-cp shell/sentinel.fish ~/.config/fish/functions/  # then split manually, or:
-# Run the installer — it handles splitting for you
-```
+**Fish** — the installer splits `shell/sentinel.fish` into individual function files in `~/.config/fish/functions/`. To do it manually, extract each `function … end` block into its own file named after the function (e.g. `git.fish`).
 
 **Zsh** — add to `~/.zshrc`:
 ```zsh
@@ -118,7 +119,7 @@ unzip archive.zip
 7z x archive.7z
 ```
 
-You can also call sentinel directly:
+You can also call sentinel directly (useful in CI or scripts):
 
 ```bash
 sentinel npm install
@@ -139,10 +140,22 @@ All options are set via environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `SENTINEL_QUARANTINE` | `/tmp/sentinel-quarantine` | Directory to move infected files into |
-| `SENTINEL_CLAM_OPTS` | `--infected --suppress-ok-results` | Extra flags passed to `clamscan` |
+| `SENTINEL_QUARANTINE` | `/tmp/sentinel-quarantine` | Directory infected files are moved into |
+| `SENTINEL_CLAM_OPTS` | see below | Flags passed to `clamscan` (overrides all defaults) |
 | `SENTINEL_SKIP_CLAM` | `0` | Set to `1` to skip ClamAV scan |
 | `SENTINEL_SKIP_AUDIT` | `0` | Set to `1` to skip npm/composer audit |
+
+**Default `clamscan` flags:**
+```
+--infected --suppress-ok-results
+--heuristic-alerts --heuristic-scan-precedence
+--alert-phishing-cloak --alert-phishing-ssl
+--detect-pua
+```
+
+`--heuristic-scan-precedence` means a heuristic hit is reported immediately without waiting to finish all signature checks — this can make detections faster. The other heuristic flags extend coverage to packed/obfuscated binaries, phishing payloads, and potentially unwanted programs beyond the core signature database.
+
+Setting `SENTINEL_CLAM_OPTS` replaces all of these defaults, so include `--infected --suppress-ok-results` in your override if you still want clean output.
 
 ### Examples
 
@@ -159,9 +172,21 @@ SENTINEL_SKIP_AUDIT=1 composer install
 
 ---
 
+## Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Clean — no threats found |
+| `1` | The wrapped command itself failed |
+| `2` | Malware detected — infected files quarantined |
+
+Audit warnings (`npm audit`, `composer audit`) do not affect the exit code.
+
+---
+
 ## CI / CD pipelines
 
-In CI there is no interactive shell to source wrappers into — call `sentinel` directly instead. No shell wrappers or `install.sh` are needed; just copy the binary and add it to `PATH`.
+In CI there is no interactive shell to source wrappers into — call `sentinel` directly. No shell wrappers or `install.sh` are needed; just copy the binary and add it to `PATH`.
 
 ### GitHub Actions
 
@@ -205,7 +230,7 @@ jobs:
 
 `$GITHUB_PATH` is the GitHub Actions mechanism for adding to `PATH` — equivalent to `export PATH=` in a local shell.
 
-> **Tip:** If sentinel is a submodule or lives in the same repo as your project, replace the `Fetch sentinel` step with `cp sentinel "$HOME/.local/bin/sentinel"` — no clone needed.
+> **Tip:** If sentinel lives in the same repo as your project, replace the `Fetch sentinel` step with `cp sentinel "$HOME/.local/bin/sentinel"` — no clone needed.
 
 ### Bitbucket Pipelines
 
@@ -234,15 +259,15 @@ definitions:
     clamav: /var/lib/clamav
 ```
 
-### Notes
+### CI notes
 
 | Topic | Detail |
 |---|---|
 | Signature update time | `freshclam` adds ~1–2 min on a cold cache. Cache `/var/lib/clamav` between runs to avoid this. |
 | Scan time | Large `node_modules` trees can be slow. Tune with `SENTINEL_CLAM_OPTS`. |
-| Audit exit codes | `npm audit` / `composer audit` are non-fatal by default (warnings only). |
-| Malware detection | Exit code `2` on infection — the build fails automatically. |
-| Skipping scans | `SENTINEL_SKIP_CLAM=1` or `SENTINEL_SKIP_AUDIT=1` to bypass individual checks for a step. |
+| Audit exit codes | `npm audit` / `composer audit` are non-fatal (warnings only). |
+| Malware detection | Exit code `2` — the build fails automatically. |
+| Skipping checks | `SENTINEL_SKIP_CLAM=1` or `SENTINEL_SKIP_AUDIT=1` to bypass individual steps. |
 
 ---
 

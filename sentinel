@@ -17,7 +17,7 @@
 set -euo pipefail
 
 QUARANTINE_DIR="${SENTINEL_QUARANTINE:-/tmp/sentinel-quarantine}"
-CLAM_OPTS="${SENTINEL_CLAM_OPTS:---infected --suppress-ok-results}"
+CLAM_OPTS="${SENTINEL_CLAM_OPTS:---infected --suppress-ok-results --heuristic-alerts --heuristic-scan-precedence --alert-phishing-cloak --alert-phishing-ssl --detect-pua}"
 SKIP_CLAM="${SENTINEL_SKIP_CLAM:-0}"
 SKIP_AUDIT="${SENTINEL_SKIP_AUDIT:-0}"
 
