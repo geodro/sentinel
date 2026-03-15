@@ -86,7 +86,8 @@ _check_prereq() {
     else
         prompt="    Install now? [Y/n] (optional — skip to continue without it): "
     fi
-    read -rp "$(echo -e "$prompt")" ans
+    printf "%s" "$prompt"
+    read -r ans </dev/tty || ans=""
 
     case "${ans,,}" in
         ""|y|yes)
@@ -272,7 +273,8 @@ fi
 # ── ClamAV signature update ───────────────────────────────────────────────────
 
 echo ""
-read -rp "$(echo -e "    Update ClamAV signatures now? (recommended) [Y/n]: ")" _freshclam_ans
+printf "    Update ClamAV signatures now? (recommended) [Y/n]: "
+read -r _freshclam_ans </dev/tty || _freshclam_ans=""
 case "${_freshclam_ans,,}" in
     ""|y|yes)
         if [[ "$(uname -s)" == Darwin ]]; then
