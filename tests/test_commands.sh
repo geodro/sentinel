@@ -48,7 +48,7 @@ make_env() {
     #   mkdir    — quarantine dir creation
     #   mktemp   — INSTALL_TIMESTAMP (npm/composer paths; harmless here)
     #   rm       — timestamp cleanup
-    for cmd in bash mkdir mktemp rm basename; do
+    for cmd in bash mkdir mktemp rm basename cat; do
         local p; p="$(command -v "$cmd" 2>/dev/null || true)"
         [[ -n "$p" ]] && ln -sf "$p" "$dir/bin/$cmd" || true
     done
@@ -178,12 +178,12 @@ assert_contains "curl -O: derived filename scanned" "$(scan_log "$E")" "archive.
 rm -rf "$E"
 
 echo ""
-echo "--- 10: curl without -o/-O writes to stdout — no scan ---"
+echo "--- 10: curl without -o/-O pipes to stdout — scans content first ---"
 E=$(make_env)
 exit_code=0
 run_cmd "$E" "" curl https://example.com/data || exit_code=$?
-assert_exit         "curl stdout: exit 0"  "$exit_code" "0"
-assert_not_contains "curl stdout: no scan" "$(scan_log "$E")" "CLAMSCAN"
+assert_exit     "curl piped stdout: exit 0"   "$exit_code" "0"
+assert_contains "curl piped stdout: scanned"  "$(scan_log "$E")" "CLAMSCAN"
 rm -rf "$E"
 
 echo ""
@@ -235,12 +235,12 @@ assert_contains "wget -P: directory scanned" "$(scan_log "$E")" "downloads"
 rm -rf "$E"
 
 echo ""
-echo "--- 16: wget -O - writes to stdout — no scan ---"
+echo "--- 16: wget -O - pipes to stdout — scans content first ---"
 E=$(make_env)
 exit_code=0
 run_cmd "$E" "" wget -O - https://example.com/file || exit_code=$?
-assert_exit         "wget stdout: exit 0"  "$exit_code" "0"
-assert_not_contains "wget stdout: no scan" "$(scan_log "$E")" "CLAMSCAN"
+assert_exit     "wget piped stdout: exit 0"   "$exit_code" "0"
+assert_contains "wget piped stdout: scanned"  "$(scan_log "$E")" "CLAMSCAN"
 rm -rf "$E"
 
 echo ""
@@ -385,21 +385,21 @@ echo ""
 echo "=== wget combined short options ==="
 echo ""
 
-echo "--- 32: wget -O- writes to stdout — no scan ---"
+echo "--- 32: wget -O- pipes to stdout — scans content first ---"
 E=$(make_env)
 exit_code=0
 run_cmd "$E" "" wget -O- https://example.com/file || exit_code=$?
-assert_exit         "wget -O-: exit 0"  "$exit_code" "0"
-assert_not_contains "wget -O-: no scan" "$(scan_log "$E")" "CLAMSCAN"
+assert_exit     "wget -O- piped: exit 0"   "$exit_code" "0"
+assert_contains "wget -O- piped: scanned"  "$(scan_log "$E")" "CLAMSCAN"
 rm -rf "$E"
 
 echo ""
-echo "--- 33: wget -qO- writes to stdout — no scan ---"
+echo "--- 33: wget -qO- pipes to stdout — scans content first ---"
 E=$(make_env)
 exit_code=0
 run_cmd "$E" "" wget -qO- https://example.com/install.sh || exit_code=$?
-assert_exit         "wget -qO-: exit 0"  "$exit_code" "0"
-assert_not_contains "wget -qO-: no scan" "$(scan_log "$E")" "CLAMSCAN"
+assert_exit     "wget -qO- piped: exit 0"   "$exit_code" "0"
+assert_contains "wget -qO- piped: scanned"  "$(scan_log "$E")" "CLAMSCAN"
 rm -rf "$E"
 
 # ── summary ───────────────────────────────────────────────────────────────────

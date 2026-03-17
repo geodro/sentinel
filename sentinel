@@ -501,7 +501,27 @@ handle_curl() {
     output_path="$(curl_output_path "$@")"
 
     if [[ -z "$output_path" ]]; then
-        # No file output (stdout or no -o/-O), run directly without scanning
+        if [[ ! -t 1 ]]; then
+            # Stdout is a pipe — download to temp, scan, then emit clean content.
+            # All sentinel messages go to stderr so they don't corrupt the pipe.
+            local tmp exit_code=0
+            tmp="$(mktemp /tmp/sentinel-curl-XXXXXX)"
+            log "Piped curl detected — scanning before passing to stdout..." >&2
+            command curl "$@" > "$tmp" || exit_code=$?
+            if [[ $exit_code -ne 0 ]]; then
+                fail "curl failed (exit ${exit_code})" >&2
+                rm -f "$tmp"
+                exit $exit_code
+            fi
+            { echo ""; log "Scanning piped curl output..."; echo ""; } >&2
+            run_clamscan "$tmp" "piped curl output" >&2 2>&1 \
+                || { fail "Security scan failed." >&2; rm -f "$tmp"; exit 2; }
+            { echo ""; ok "Scan clean — passing to stdout."; echo ""; } >&2
+            cat "$tmp"
+            rm -f "$tmp"
+            exit 0
+        fi
+        # Stdout is a terminal — pass through without scanning
         command curl "$@"
         exit $?
     fi
@@ -530,7 +550,27 @@ handle_wget() {
     scan_target="$(wget_scan_target "$@")"
 
     if [[ -z "$scan_target" ]]; then
-        # Writing to stdout, run directly
+        if [[ ! -t 1 ]]; then
+            # Stdout is a pipe — download to temp, scan, then emit clean content.
+            # All sentinel messages go to stderr so they don't corrupt the pipe.
+            local tmp exit_code=0
+            tmp="$(mktemp /tmp/sentinel-wget-XXXXXX)"
+            log "Piped wget detected — scanning before passing to stdout..." >&2
+            command wget "$@" > "$tmp" || exit_code=$?
+            if [[ $exit_code -ne 0 ]]; then
+                fail "wget failed (exit ${exit_code})" >&2
+                rm -f "$tmp"
+                exit $exit_code
+            fi
+            { echo ""; log "Scanning piped wget output..."; echo ""; } >&2
+            run_clamscan "$tmp" "piped wget output" >&2 2>&1 \
+                || { fail "Security scan failed." >&2; rm -f "$tmp"; exit 2; }
+            { echo ""; ok "Scan clean — passing to stdout."; echo ""; } >&2
+            cat "$tmp"
+            rm -f "$tmp"
+            exit 0
+        fi
+        # Stdout is a terminal — pass through without scanning
         command wget "$@"
         exit $?
     fi
