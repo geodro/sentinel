@@ -354,6 +354,11 @@ wget_scan_target() {
             --output-document=*)
                 output="${arg#*=}"
                 ;;
+            # Combined short option with embedded -O value (e.g. -O-, -qO-, -qO/path)
+            -*O*)
+                local _val="${arg##*O}"
+                [[ -n "$_val" ]] && output="$_val"
+                ;;
             -P|--directory-prefix)
                 (( i++ )) || true
                 prefix="${args[$i]:-}"

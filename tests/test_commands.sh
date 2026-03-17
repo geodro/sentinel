@@ -379,6 +379,29 @@ run_cmd "$E" "SENTINEL_SKIP_CLAM=1" 7z x archive.7z || true
 assert_not_contains "7z: skip clam" "$(scan_log "$E")" "CLAMSCAN"
 rm -rf "$E"
 
+# ── wget combined short options ───────────────────────────────────────────────
+
+echo ""
+echo "=== wget combined short options ==="
+echo ""
+
+echo "--- 32: wget -O- writes to stdout — no scan ---"
+E=$(make_env)
+exit_code=0
+run_cmd "$E" "" wget -O- https://example.com/file || exit_code=$?
+assert_exit         "wget -O-: exit 0"  "$exit_code" "0"
+assert_not_contains "wget -O-: no scan" "$(scan_log "$E")" "CLAMSCAN"
+rm -rf "$E"
+
+echo ""
+echo "--- 33: wget -qO- writes to stdout — no scan ---"
+E=$(make_env)
+exit_code=0
+run_cmd "$E" "" wget -qO- https://example.com/install.sh || exit_code=$?
+assert_exit         "wget -qO-: exit 0"  "$exit_code" "0"
+assert_not_contains "wget -qO-: no scan" "$(scan_log "$E")" "CLAMSCAN"
+rm -rf "$E"
+
 # ── summary ───────────────────────────────────────────────────────────────────
 
 echo ""
