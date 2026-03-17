@@ -33,6 +33,10 @@ function curl --wraps curl --description 'curl with ClamAV scanning on file down
     sentinel curl $argv
 end
 
+function bash --wraps bash --description 'bash with ClamAV scanning on process substitution and script files'
+    sentinel bash $argv
+end
+
 function wget --wraps wget --description 'wget with ClamAV scanning on file downloads'
     sentinel wget $argv
 end

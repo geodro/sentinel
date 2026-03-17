@@ -8,6 +8,8 @@
 #   sentinel git pull
 #   sentinel curl -o file.zip https://example.com/file.zip
 #   sentinel wget https://example.com/file.zip
+#   sentinel bash /dev/fd/63  (via bash <(curl ...) wrapper)
+#   sentinel bash script.sh
 #   sentinel tar xf archive.tar.gz
 #   sentinel unzip archive.zip
 #   sentinel 7z x archive.7z
@@ -663,6 +665,98 @@ handle_7z() {
     exit 0
 }
 
+handle_bash() {
+    # Find the script argument: first non-option arg (or after --)
+    # Bail out early if -c is present (inline command, not a file to scan)
+    local script="" before=() after=() found=0 skip_next=0
+
+    for arg in "$@"; do
+        if [[ $found -eq 1 ]]; then
+            after+=("$arg")
+            continue
+        fi
+        if [[ $skip_next -eq 1 ]]; then
+            before+=("$arg")
+            skip_next=0
+            continue
+        fi
+        case "$arg" in
+            -c)
+                # Inline command string — no script file to scan, pass through
+                command bash "$@"
+                exit $?
+                ;;
+            -o)
+                # -o takes an option name value
+                before+=("$arg")
+                skip_next=1
+                ;;
+            --)
+                before+=("$arg")
+                # Everything after -- is script + args; grab next iteration as script
+                found=2  # signal: next non-flag is the script after --
+                ;;
+            -*)
+                before+=("$arg")
+                ;;
+            *)
+                script="$arg"
+                found=1
+                ;;
+        esac
+    done
+
+    # No script file — interactive or stdin mode, pass through
+    if [[ -z "$script" ]]; then
+        command bash "$@"
+        exit $?
+    fi
+
+    # Process substitution: bash <(curl ...) passes /dev/fd/NN, /proc/self/fd/NN,
+    # or a named pipe (FIFO) on systems that use those for process substitution.
+    if [[ "$script" == /dev/fd/* ]] || [[ "$script" == /proc/self/fd/* ]] || [[ -p "$script" ]]; then
+        local tmp
+        tmp="$(mktemp /tmp/sentinel-bash-XXXXXX.sh)"
+        log "Process substitution detected — scanning script before execution..."
+        echo ""
+        # Read the fd content into a temp file (the fd may already hold scanned
+        # content if it came through our curl wrapper)
+        cat "$script" > "$tmp" 2>/dev/null || {
+            rm -f "$tmp"
+            warn "Could not read process substitution fd — passing through"
+            command bash "$@"
+            exit $?
+        }
+        run_clamscan "$tmp" "bash process substitution" \
+            || { fail "Security scan failed."; rm -f "$tmp"; exit 2; }
+        echo ""
+        ok "Scan clean — executing script."
+        echo ""
+        # Run with temp file so stdin stays attached to the terminal
+        command bash "${before[@]+"${before[@]}"}" "$tmp" "${after[@]+"${after[@]}"}"
+        local ret=$?
+        rm -f "$tmp"
+        exit $ret
+    fi
+
+    # Regular script file
+    if [[ -f "$script" ]]; then
+        echo ""
+        log "Scanning script '${script}' before execution..."
+        echo ""
+        run_clamscan "$script" "$script" || { fail "Security scan failed."; exit 2; }
+        echo ""
+        ok "Scan clean — executing script."
+        echo ""
+        command bash "$@"
+        exit $?
+    fi
+
+    # Script not found or other special case — pass through
+    command bash "$@"
+    exit $?
+}
+
 is_install_cmd() {
     local manager="$1"
     local cmd="$2"
@@ -699,6 +793,8 @@ Commands:
   git pull / git fetch                         Scan current directory
   curl -o <file> <url>                         Scan downloaded file
   wget <url>                                   Scan downloaded file
+  bash <(curl -fsSL <url>)                     Scan script before execution (stdin stays as terminal)
+  bash script.sh                               Scan script file before execution
   tar xf <archive> [-C <dir>]                 Scan extraction directory
   unzip <archive> [-d <dir>]                  Scan extraction directory
   7z x <archive> [-o<dir>]                    Scan extraction directory
@@ -755,12 +851,13 @@ EOF
     git)          handle_git "$@" ;;
     curl)         handle_curl "$@" ;;
     wget)         handle_wget "$@" ;;
+    bash)         handle_bash "$@" ;;
     tar)          handle_tar "$@" ;;
     unzip)        handle_unzip "$@" ;;
     7z|7za)       handle_7z "$@" ;;
     npm|composer) ;;
     *)
-        echo "Unsupported: $MANAGER (supported: npm, composer, git, curl, wget, tar, unzip, 7z, 7za)"
+        echo "Unsupported: $MANAGER (supported: npm, composer, git, curl, wget, bash, tar, unzip, 7z, 7za)"
         exit 1
         ;;
 esac

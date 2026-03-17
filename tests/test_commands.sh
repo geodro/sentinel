@@ -402,6 +402,68 @@ assert_exit     "wget -qO- piped: exit 0"   "$exit_code" "0"
 assert_contains "wget -qO- piped: scanned"  "$(scan_log "$E")" "CLAMSCAN"
 rm -rf "$E"
 
+# ── bash ──────────────────────────────────────────────────────────────────────
+
+echo ""
+echo "=== bash ==="
+echo ""
+
+echo "--- 34: bash <(process substitution): FIFO — scans fd content ---"
+E=$(make_env)
+# Simulate process substitution by creating a named pipe (FIFO) and writing to it
+# before sentinel reads it.  On Linux, bash <(...) uses /dev/fd/NN (a pipe);
+# on some systems it uses a FIFO — we cover both with the -p check in handle_bash.
+FIFO="$(mktemp -u /tmp/sentinel-test-fd-XXXXXX)"
+mkfifo "$FIFO"
+# Write script content to the FIFO in the background so the reader doesn't block
+printf '#!/usr/bin/env bash\necho hello\n' > "$FIFO" &
+WRITER_PID=$!
+run_cmd "$E" "" bash "$FIFO" || true
+wait "$WRITER_PID" 2>/dev/null || true
+assert_contains "bash FIFO: scanned" "$(scan_log "$E")" "CLAMSCAN"
+rm -f "$FIFO"
+rm -rf "$E"
+
+echo ""
+echo "--- 35: bash script.sh: regular script file — scans before execution ---"
+E=$(make_env)
+SCRIPT="$E/project/install.sh"
+echo '#!/usr/bin/env bash' > "$SCRIPT"
+echo 'echo hello' >> "$SCRIPT"
+run_cmd "$E" "" bash "$SCRIPT" || true
+assert_contains "bash script.sh: scanned" "$(scan_log "$E")" "CLAMSCAN"
+rm -rf "$E"
+
+echo ""
+echo "--- 36: bash -c: inline command — passes through without scan ---"
+E=$(make_env)
+exit_code=0
+run_cmd "$E" "" bash -c "echo hello" || exit_code=$?
+assert_exit         "bash -c: exit 0"   "$exit_code" "0"
+assert_not_contains "bash -c: no scan"  "$(scan_log "$E")" "CLAMSCAN"
+rm -rf "$E"
+
+echo ""
+echo "--- 37: bash script.sh: infected script causes exit 2 ---"
+E=$(make_env)
+printf '#!/usr/bin/env bash\necho "CLAMSCAN $*" >> "$CLAMSCAN_LOG"\nexit 1\n' > "$E/bin/clamscan"
+chmod +x "$E/bin/clamscan"
+SCRIPT="$E/project/malware.sh"
+echo '#!/usr/bin/env bash' > "$SCRIPT"
+exit_code=0
+run_cmd "$E" "" bash "$SCRIPT" || exit_code=$?
+assert_exit "bash script: infected → exit 2" "$exit_code" "2"
+rm -rf "$E"
+
+echo ""
+echo "--- 38: SENTINEL_SKIP_CLAM=1 skips bash script scan ---"
+E=$(make_env)
+SCRIPT="$E/project/install.sh"
+echo '#!/usr/bin/env bash' > "$SCRIPT"
+run_cmd "$E" "SENTINEL_SKIP_CLAM=1" bash "$SCRIPT" || true
+assert_not_contains "bash: skip clam" "$(scan_log "$E")" "CLAMSCAN"
+rm -rf "$E"
+
 # ── summary ───────────────────────────────────────────────────────────────────
 
 echo ""

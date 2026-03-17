@@ -42,6 +42,10 @@ curl() {
     sentinel curl "$@"
 }
 
+bash() {
+    sentinel bash "$@"
+}
+
 wget() {
     sentinel wget "$@"
 }
