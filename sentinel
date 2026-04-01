@@ -41,6 +41,61 @@ require() {
     fi
 }
 
+# Prompt the user for each infected file found in clamscan output.
+# Reads clamscan stdout passed as first argument (string).
+# Returns: 0 = all ignored, 1 = any quarantined/deleted, 2 = user aborted.
+handle_clam_detections() {
+    local scan_output="$1"
+    local any_action=0
+
+    while IFS= read -r line; do
+        # clamscan FOUND lines: "/path/to/file: ThreatName FOUND"
+        [[ "$line" == *": "* && "$line" == *" FOUND" ]] || continue
+
+        local file="${line%%: *}"
+        local threat="${line#*: }"
+        threat="${threat% FOUND}"
+
+        echo -e "${RED}[sentinel] THREAT DETECTED: ${file}${RESET}"
+        echo -e "${RED}           Signature: ${threat}${RESET}"
+        echo -e "${YELLOW}  Actions: [q] quarantine   [d] delete   [i] ignore (false positive)   [a] abort${RESET}"
+
+        local choice
+        while true; do
+            printf '%s' "Choice [q/d/i/a]: "
+            read -r choice </dev/tty
+            case "$choice" in
+                q|Q)
+                    mkdir -p "$QUARANTINE_DIR"
+                    mv "$file" "$QUARANTINE_DIR/"
+                    ok "Quarantined: ${file} → ${QUARANTINE_DIR}/"
+                    any_action=1
+                    break
+                    ;;
+                d|D)
+                    rm -f "$file"
+                    ok "Deleted: ${file}"
+                    any_action=1
+                    break
+                    ;;
+                i|I)
+                    warn "Ignored: ${file} (marked as false positive)"
+                    break
+                    ;;
+                a|A)
+                    fail "Scan aborted by user."
+                    return 2
+                    ;;
+                *)
+                    echo "Please enter q, d, i, or a."
+                    ;;
+            esac
+        done
+    done <<< "$scan_output"
+
+    return $any_action
+}
+
 # Scan a file or directory with ClamAV. Works for both.
 run_clamscan() {
     local path="$1"
@@ -59,21 +114,22 @@ run_clamscan() {
     fi
 
     log "Scanning ${label} with ClamAV..."
-    mkdir -p "$QUARANTINE_DIR"
 
     # -r recurses directories; passing -r with a single file is a no-op
     # shellcheck disable=SC2086
-    if clamscan -r "$path" $CLAM_OPTS --move="$QUARANTINE_DIR"; then
+    local scan_output
+    scan_output=$(clamscan -r "$path" $CLAM_OPTS 2>&1)
+    local exit_code=$?
+
+    if [[ $exit_code -eq 0 ]]; then
         ok "ClamAV: no threats found in ${label}"
+    elif [[ $exit_code -eq 1 ]]; then
+        handle_clam_detections "$scan_output"
+        local rc=$?
+        [[ $rc -eq 0 ]] && ok "ClamAV: all detections ignored in ${label}"
+        return $([[ $rc -eq 0 ]] && echo 0 || echo 1)
     else
-        local exit_code=$?
-        if [[ $exit_code -eq 1 ]]; then
-            fail "ClamAV: threats found in ${label}! Infected files moved to ${QUARANTINE_DIR}"
-            fail "Review quarantined files before proceeding."
-            return 1
-        else
-            warn "ClamAV exited with code ${exit_code} (scan error)"
-        fi
+        warn "ClamAV exited with code ${exit_code} (scan error)"
     fi
 }
 
@@ -199,19 +255,21 @@ scan_npm_project_files() {
     [[ ${#new_files[@]} -eq 0 ]] && return 0
 
     log "Scanning ${#new_files[@]} file(s) written to project tree during install..."
-    mkdir -p "$QUARANTINE_DIR"
 
     # shellcheck disable=SC2086
-    if clamscan $CLAM_OPTS --move="$QUARANTINE_DIR" "${new_files[@]}"; then
+    local scan_output
+    scan_output=$(clamscan $CLAM_OPTS "${new_files[@]}" 2>&1)
+    local exit_code=$?
+
+    if [[ $exit_code -eq 0 ]]; then
         ok "ClamAV: no threats found in project files (${#new_files[@]} file(s))"
+    elif [[ $exit_code -eq 1 ]]; then
+        handle_clam_detections "$scan_output"
+        local rc=$?
+        [[ $rc -eq 0 ]] && ok "ClamAV: all detections ignored in project files"
+        return $([[ $rc -eq 0 ]] && echo 0 || echo 1)
     else
-        local exit_code=$?
-        if [[ $exit_code -eq 1 ]]; then
-            fail "ClamAV: threats found in project files! Infected files moved to ${QUARANTINE_DIR}"
-            return 1
-        else
-            warn "ClamAV exited with code ${exit_code} (scan error)"
-        fi
+        warn "ClamAV exited with code ${exit_code} (scan error)"
     fi
 }
 
@@ -236,19 +294,21 @@ scan_composer_project_files() {
     [[ ${#new_files[@]} -eq 0 ]] && return 0
 
     log "Scanning ${#new_files[@]} file(s) written to project tree during install..."
-    mkdir -p "$QUARANTINE_DIR"
 
     # shellcheck disable=SC2086
-    if clamscan $CLAM_OPTS --move="$QUARANTINE_DIR" "${new_files[@]}"; then
+    local scan_output
+    scan_output=$(clamscan $CLAM_OPTS "${new_files[@]}" 2>&1)
+    local exit_code=$?
+
+    if [[ $exit_code -eq 0 ]]; then
         ok "ClamAV: no threats found in project files (${#new_files[@]} file(s))"
+    elif [[ $exit_code -eq 1 ]]; then
+        handle_clam_detections "$scan_output"
+        local rc=$?
+        [[ $rc -eq 0 ]] && ok "ClamAV: all detections ignored in project files"
+        return $([[ $rc -eq 0 ]] && echo 0 || echo 1)
     else
-        local exit_code=$?
-        if [[ $exit_code -eq 1 ]]; then
-            fail "ClamAV: threats found in project files! Infected files moved to ${QUARANTINE_DIR}"
-            return 1
-        else
-            warn "ClamAV exited with code ${exit_code} (scan error)"
-        fi
+        warn "ClamAV exited with code ${exit_code} (scan error)"
     fi
 }
 
