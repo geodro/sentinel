@@ -546,6 +546,11 @@ handle_git() {
     local git_cmd="${1:-}"
     shift || true
 
+    if [[ "$git_cmd" == "pull" ]]; then
+        handle_git_pull "$@"
+        exit $?
+    fi
+
     log "Running: git ${git_cmd} $*"
     command git "$git_cmd" "$@"
     local exit_code=$?
@@ -560,7 +565,7 @@ handle_git() {
         clone)
             scan_dir="$(git_clone_target_dir "$@")"
             ;;
-        pull|fetch)
+        fetch)
             scan_dir="."
             ;;
         *)
@@ -576,6 +581,76 @@ handle_git() {
     echo ""
     ok "All scans complete."
     exit 0
+}
+
+# git pull: skip scan if already up to date; otherwise scan only the
+# files actually retrieved by the pull (HEAD diff before/after).
+handle_git_pull() {
+    log "Running: git pull $*"
+
+    local old_head=""
+    old_head=$(command git rev-parse HEAD 2>/dev/null || true)
+
+    local pull_output exit_code=0
+    pull_output=$(command git pull "$@" 2>&1) || exit_code=$?
+    printf '%s\n' "$pull_output"
+
+    if [[ $exit_code -ne 0 ]]; then
+        fail "git pull failed (exit ${exit_code})"
+        return $exit_code
+    fi
+
+    if [[ "$pull_output" == *"Already up to date"* || "$pull_output" == *"Already up-to-date"* ]]; then
+        log "Repository already up to date — nothing to scan."
+        return 0
+    fi
+
+    local new_head=""
+    new_head=$(command git rev-parse HEAD 2>/dev/null || true)
+
+    local -a changed_files=()
+    if [[ -n "$old_head" && -n "$new_head" && "$old_head" != "$new_head" ]]; then
+        while IFS= read -r f; do
+            [[ -n "$f" && -e "$f" ]] && changed_files+=("$f")
+        done < <(command git diff --name-only "$old_head" "$new_head" 2>/dev/null)
+    fi
+
+    if [[ ${#changed_files[@]} -eq 0 ]]; then
+        log "git pull complete — no retrieved files to scan."
+        return 0
+    fi
+
+    echo ""
+    log "git pull complete — scanning ${#changed_files[@]} retrieved file(s) with ClamAV..."
+    echo ""
+
+    if [[ "$SKIP_CLAM" == "1" ]]; then
+        warn "ClamAV scan skipped (SENTINEL_SKIP_CLAM=1)"
+        return 0
+    fi
+    if ! require clamscan "ClamAV scan"; then return 0; fi
+
+    local scan_output scan_exit=0
+    # shellcheck disable=SC2086
+    scan_output=$(clamscan $CLAM_OPTS "${changed_files[@]}" 2>&1) || scan_exit=$?
+
+    if [[ $scan_exit -eq 0 ]]; then
+        ok "ClamAV: no threats found in ${#changed_files[@]} retrieved file(s)"
+    elif [[ $scan_exit -eq 1 ]]; then
+        handle_clam_detections "$scan_output"
+        local rc=$?
+        if [[ $rc -ne 0 ]]; then
+            fail "Security scan failed."
+            return 2
+        fi
+        ok "ClamAV: all detections ignored"
+    else
+        warn "ClamAV exited with code ${scan_exit} (scan error)"
+    fi
+
+    echo ""
+    ok "All scans complete."
+    return 0
 }
 
 handle_curl() {

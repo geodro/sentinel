@@ -115,10 +115,58 @@ assert_contains "git clone: explicit dir scanned" "$(scan_log "$E")" "mydir"
 rm -rf "$E"
 
 echo ""
-echo "--- 3: git pull scans current directory ---"
+echo "--- 3a: git pull 'Already up to date' skips scan ---"
 E=$(make_env)
+cat > "$E/bin/git" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+    pull)      echo "Already up to date." ;;
+    rev-parse) echo "deadbeef" ;;
+esac
+exit 0
+EOF
+chmod +x "$E/bin/git"
 run_cmd "$E" "" git pull || true
-assert_contains "git pull: cwd scanned" "$(scan_log "$E")" "CLAMSCAN"
+assert_not_contains "git pull: up-to-date → no scan" "$(scan_log "$E")" "CLAMSCAN"
+rm -rf "$E"
+
+echo ""
+echo "--- 3b: git pull scans only retrieved files ---"
+E=$(make_env)
+mkdir -p "$E/project"
+: > "$E/project/changed1.txt"
+: > "$E/project/changed2.txt"
+: > "$E/project/untouched.txt"
+REVPARSE_MARKER="$E/revparse-marker"
+cat > "$E/bin/git" <<EOF
+#!/usr/bin/env bash
+case "\$1" in
+    pull)
+        echo "Updating aaaaaaa..bbbbbbb"
+        echo "Fast-forward"
+        ;;
+    rev-parse)
+        # First call returns old sha, second returns new sha
+        if [[ -f "$REVPARSE_MARKER" ]]; then
+            echo "bbbbbbb"
+        else
+            echo "aaaaaaa"
+            : > "$REVPARSE_MARKER"
+        fi
+        ;;
+    diff)
+        echo "changed1.txt"
+        echo "changed2.txt"
+        ;;
+esac
+exit 0
+EOF
+chmod +x "$E/bin/git"
+run_cmd "$E" "" git pull || true
+log_out="$(scan_log "$E")"
+assert_contains     "git pull: scanned changed1.txt"   "$log_out" "changed1.txt"
+assert_contains     "git pull: scanned changed2.txt"   "$log_out" "changed2.txt"
+assert_not_contains "git pull: skipped untouched.txt"  "$log_out" "untouched.txt"
 rm -rf "$E"
 
 echo ""
