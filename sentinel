@@ -43,14 +43,27 @@ require() {
 
 # Prompt the user for each infected file found in clamscan output.
 # Reads clamscan stdout passed as first argument (string).
-# Returns: 0 = all ignored, 1 = any quarantined/deleted, 2 = user aborted.
+# Returns: 0 = all ignored, 1 = any quarantined/deleted, 2 = aborted (by user,
+#          missing tty, or unparseable clamscan output).
 handle_clam_detections() {
     local scan_output="$1"
     local any_action=0
+    local found_count=0
+
+    # Non-interactive (no controlling terminal): can't prompt, so abort safely.
+    if [[ ! -r /dev/tty ]]; then
+        fail "ClamAV detected threats but no terminal is available for prompting — aborting."
+        # Surface any FOUND lines so the user/log can see what triggered the abort.
+        printf '%s\n' "$scan_output" | while IFS= read -r line; do
+            [[ "$line" == *": "*" FOUND" ]] && echo -e "${RED}  ${line}${RESET}"
+        done
+        return 2
+    fi
 
     while IFS= read -r line; do
         # clamscan FOUND lines: "/path/to/file: ThreatName FOUND"
         [[ "$line" == *": "* && "$line" == *" FOUND" ]] || continue
+        found_count=$((found_count + 1))
 
         local file="${line%%: *}"
         local threat="${line#*: }"
@@ -92,6 +105,13 @@ handle_clam_detections() {
             esac
         done
     done <<< "$scan_output"
+
+    # clamscan said infected but we couldn't parse any FOUND lines — treat as failure
+    # rather than silently letting the command succeed.
+    if [[ $found_count -eq 0 ]]; then
+        fail "ClamAV reported threats but no FOUND lines were parsed — aborting."
+        return 2
+    fi
 
     return $any_action
 }
