@@ -551,6 +551,11 @@ handle_git() {
         exit $?
     fi
 
+    if [[ "$git_cmd" == "fetch" ]]; then
+        handle_git_fetch "$@"
+        exit $?
+    fi
+
     log "Running: git ${git_cmd} $*"
     command git "$git_cmd" "$@"
     local exit_code=$?
@@ -564,9 +569,6 @@ handle_git() {
     case "$git_cmd" in
         clone)
             scan_dir="$(git_clone_target_dir "$@")"
-            ;;
-        fetch)
-            scan_dir="."
             ;;
         *)
             exit 0
@@ -636,6 +638,94 @@ handle_git_pull() {
 
     if [[ $scan_exit -eq 0 ]]; then
         ok "ClamAV: no threats found in ${#changed_files[@]} retrieved file(s)"
+    elif [[ $scan_exit -eq 1 ]]; then
+        handle_clam_detections "$scan_output"
+        local rc=$?
+        if [[ $rc -ne 0 ]]; then
+            fail "Security scan failed."
+            return 2
+        fi
+        ok "ClamAV: all detections ignored"
+    else
+        warn "ClamAV exited with code ${scan_exit} (scan error)"
+    fi
+
+    echo ""
+    ok "All scans complete."
+    return 0
+}
+
+# git fetch: retrieves objects into .git without touching the working tree.
+# Skip scanning when nothing was fetched; otherwise extract the new blobs
+# (files that differ between HEAD and FETCH_HEAD) and scan those.
+handle_git_fetch() {
+    log "Running: git fetch $*"
+
+    local fetch_output exit_code=0
+    fetch_output=$(command git fetch "$@" 2>&1) || exit_code=$?
+    printf '%s\n' "$fetch_output"
+
+    if [[ $exit_code -ne 0 ]]; then
+        fail "git fetch failed (exit ${exit_code})"
+        return $exit_code
+    fi
+
+    local git_dir
+    git_dir=$(command git rev-parse --git-dir 2>/dev/null || echo ".git")
+
+    if [[ ! -s "$git_dir/FETCH_HEAD" ]]; then
+        log "git fetch complete — nothing retrieved, skipping scan."
+        return 0
+    fi
+
+    local -a changed_files=()
+    while IFS= read -r f; do
+        [[ -n "$f" ]] && changed_files+=("$f")
+    done < <(command git diff --name-only HEAD FETCH_HEAD 2>/dev/null)
+
+    if [[ ${#changed_files[@]} -eq 0 ]]; then
+        log "git fetch complete — no new files to scan."
+        return 0
+    fi
+
+    local tmpdir
+    tmpdir=$(mktemp -d /tmp/sentinel-fetch-XXXXXX) || {
+        fail "Could not create temp directory for scan."
+        return 2
+    }
+    trap 'rm -rf "$tmpdir"' RETURN
+
+    local -a scan_targets=()
+    local f
+    for f in "${changed_files[@]}"; do
+        local dest="$tmpdir/$f"
+        mkdir -p "$(dirname "$dest")" 2>/dev/null || continue
+        if command git show "FETCH_HEAD:$f" >"$dest" 2>/dev/null; then
+            scan_targets+=("$dest")
+        fi
+    done
+
+    if [[ ${#scan_targets[@]} -eq 0 ]]; then
+        log "git fetch complete — no extractable files to scan."
+        return 0
+    fi
+
+    echo ""
+    log "git fetch complete — scanning ${#scan_targets[@]} retrieved file(s) with ClamAV..."
+    echo ""
+
+    if [[ "$SKIP_CLAM" == "1" ]]; then
+        warn "ClamAV scan skipped (SENTINEL_SKIP_CLAM=1)"
+        return 0
+    fi
+    if ! require clamscan "ClamAV scan"; then return 0; fi
+
+    local scan_output scan_exit=0
+    # shellcheck disable=SC2086
+    scan_output=$(clamscan $CLAM_OPTS "${scan_targets[@]}" 2>&1) || scan_exit=$?
+
+    if [[ $scan_exit -eq 0 ]]; then
+        ok "ClamAV: no threats found in ${#scan_targets[@]} retrieved file(s)"
     elif [[ $scan_exit -eq 1 ]]; then
         handle_clam_detections "$scan_output"
         local rc=$?
